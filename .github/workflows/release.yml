@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer mono-mcs
+        run: sudo apt-get update && sudo apt-get install -y mono-mcs mono-devel
+
+      - name: Construire les livrables
+        run: ./build/build.sh
+
+      - name: Publier la release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/PC-Malin.exe
+            dist/PC-Malin.cmd
+          body: |
+            **PC Malin** — l'entretien facile de votre ordinateur Windows.
+
+            Deux formats au choix, même contenu :
+            - `PC-Malin.exe` — double-clic et c'est parti (voir la note SmartScreen du README)
+            - `PC-Malin.cmd` — version lisible dans le Bloc-notes avant lancement
+
+            Windows 10 / 11 · Guide : `docs/guide.html`
