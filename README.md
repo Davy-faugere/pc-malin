@@ -22,6 +22,7 @@
 | 🖥️ | **Mon ordinateur** | La carte d'identité de votre PC : nom, modèle, Windows, mémoire, espace disque |
 | 🧹 | **Faire le ménage** | Corbeille, fichiers temporaires, restes de mises à jour — vidés en un clic, avec le total d'espace récupéré |
 | 💚 | **Bilan de santé** | 4 contrôles (disque, mémoire, redémarrage, Internet) en vert / orange / rouge, avec un conseil clair |
+| 🔎 | **Analyser mon PC** | 10 contrôles approfondis (disque, SSD, mémoire, démarrage, mises à jour, protection…), une **note sur 20** et un **rapport PDF** à garder ou montrer à votre dépanneur |
 | 💡 | **Conseils** | Les 6 réflexes qui évitent 80 % des « ça rame » |
 
 > **🔒 Vos documents, photos et fichiers personnels ne sont JAMAIS touchés.**

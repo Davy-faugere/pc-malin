@@ -160,6 +160,11 @@ function Draw-Icon { param($g,[string]$type,$color,$x,$y,$sz)
             $g.DrawLine($pen,$x+$sz*0.48,$y+$sz*0.76,$x+$sz*0.60,$y+$sz*0.5)
             $g.DrawLine($pen,$x+$sz*0.60,$y+$sz*0.5,$x+$sz,$y+$sz*0.5)
         }
+        'scan' {
+            $g.DrawEllipse($pen,$x+$sz*0.10,$y+$sz*0.10,$sz*0.52,$sz*0.52)
+            $g.DrawLine($pen,$x+$sz*0.58,$y+$sz*0.58,$x+$sz*0.88,$y+$sz*0.88)
+            $g.DrawLine($pen,$x+$sz*0.24,$y+$sz*0.36,$x+$sz*0.48,$y+$sz*0.36)
+        }
         'bulb' {
             $g.DrawEllipse($pen,$x+$sz*0.24,$y+$sz*0.06,$sz*0.52,$sz*0.52)
             $g.DrawLine($pen,$x+$sz*0.40,$y+$sz*0.62,$x+$sz*0.60,$y+$sz*0.62)
@@ -195,7 +200,7 @@ $hdr.Controls.Add($btnHome)
 # Onglets
 $TC = [System.Windows.Forms.TabControl]::new()
 $TC.Location=[Drawing.Point]::new(0,64); $TC.Size=[Drawing.Size]::new(900,580); $TC.Font=$FN
-$TC.DrawMode='OwnerDrawFixed'; $TC.SizeMode='Fixed'; $TC.ItemSize=[Drawing.Size]::new(222,34)
+$TC.DrawMode='OwnerDrawFixed'; $TC.SizeMode='Fixed'; $TC.ItemSize=[Drawing.Size]::new(176,34)
 $TC.Add_DrawItem({
     param($sender,$e)
     $page=$sender.TabPages[$e.Index]; $rect=$sender.GetTabRect($e.Index)
@@ -429,7 +434,263 @@ $bBilan.Add_Click({ param($sender,$e)
 })
 
 # ════════════════════════════════════════════════════════════════
-#  ONGLET 4 : CONSEILS
+#  ONGLET 4 : ANALYSER MON PC  (v1.1)
+# ════════════════════════════════════════════════════════════════
+$tA = New-Tab "Analyser mon PC"; $TC.TabPages.Add($tA)
+$tA.Controls.Add((New-Label "L'analyse complete de votre ordinateur" 0 4 600 28 $true))
+$tA.Controls.Add((New-Label "10 controles pour comprendre pourquoi ca rame. Rien n'est modifie, rien ne sort de votre PC." 0 36 780 24))
+
+$bAna = New-Btn "Lancer l'analyse (1 minute)" 0 74 250 42 $Teal
+$tA.Controls.Add($bAna)
+$bAnaPdf = New-Btn "Enregistrer le rapport (PDF)" 266 74 250 42 $Blue
+$bAnaPdf.Enabled = $false
+$tA.Controls.Add($bAnaPdf)
+$lblAna = New-Label "" 532 74 320 42; $lblAna.ForeColor=$Mute; $tA.Controls.Add($lblAna)
+
+$pnlAna = [System.Windows.Forms.Panel]::new()
+$pnlAna.Location=[Drawing.Point]::new(0,132); $pnlAna.Size=[Drawing.Size]::new(830,330); $pnlAna.AutoScroll=$true
+$tA.Controls.Add($pnlAna)
+
+$Script:AnaResults = @()
+$Script:AnaScore = 0
+$Script:AnaDate = $null
+
+function Add-AnaResult { param($titre,$etat,$verdict,$conseil)
+    $Script:AnaResults += ,@($titre,$etat,$verdict,$conseil)
+}
+function Add-AnaCard { param($y,$titre,$etat,$verdict,$conseil)
+    $card=New-Card 0 $y 780 62; $pnlAna.Controls.Add($card)
+    $col= switch($verdict){ 'ok'{$Green} 'warn'{$Orange} 'ko'{$Red} default{$Blue} }
+    $puce=[System.Windows.Forms.Panel]::new(); $puce.Location=[Drawing.Point]::new(16,20); $puce.Size=[Drawing.Size]::new(22,22); $puce.BackColor=$col
+    $card.Controls.Add($puce)
+    $lt=New-Label $titre 52 8 300 24 $true; $lt.BackColor=$CardBg; $card.Controls.Add($lt)
+    $le=New-Label $etat 52 32 300 22; $le.ForeColor=$Mute; $le.BackColor=$CardBg; $card.Controls.Add($le)
+    $lc=New-Label $conseil 364 8 404 48; $lc.ForeColor=$col; $lc.BackColor=$CardBg; $card.Controls.Add($lc)
+}
+function Ana-Step { param($i,$txt)
+    $lblAna.Text = "Controle $i/10 : $txt..."
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Run-Analyse {
+    $Script:AnaResults = @()
+    $Script:AnaDate = Get-Date
+
+    # 1. Espace disque
+    Ana-Step 1 "espace disque"
+    try {
+        $d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -EA Stop
+        $freeP=[int](($d.FreeSpace/$d.Size)*100)
+        $tx="{0}% libres ({1:N0} Go sur {2:N0} Go)" -f $freeP,($d.FreeSpace/1GB),($d.Size/1GB)
+        if ($freeP -ge 20) { Add-AnaResult "Espace de stockage" $tx 'ok' "Parfait, il reste de la place." }
+        elseif ($freeP -ge 8) { Add-AnaResult "Espace de stockage" $tx 'warn' "Ca se remplit : faites le menage (onglet dedie)." }
+        else { Add-AnaResult "Espace de stockage" $tx 'ko' "Presque plein ! Windows ralentit sous 10%. Grand nettoyage conseille." }
+    } catch { Add-AnaResult "Espace de stockage" "impossible a lire" 'warn' "Relancez l'analyse." }
+
+    # 2. Type de disque (SSD / disque dur)
+    Ana-Step 2 "type de disque"
+    try {
+        $pd=@(Get-PhysicalDisk -EA Stop | Sort-Object DeviceId | Select-Object -First 1)
+        if ($pd.Count -gt 0 -and "$($pd[0].MediaType)" -match 'SSD') {
+            Add-AnaResult "Type de disque" "SSD (rapide)" 'ok' "Tres bien : c'est le meilleur atout d'un PC reactif."
+        } elseif ($pd.Count -gt 0 -and "$($pd[0].MediaType)" -match 'HDD') {
+            Add-AnaResult "Type de disque" "Disque dur classique (lent)" 'warn' "Passer sur un SSD redonnerait une seconde jeunesse a ce PC."
+        } else {
+            Add-AnaResult "Type de disque" "$($pd[0].MediaType)" 'ok' "Rien a signaler."
+        }
+    } catch { Add-AnaResult "Type de disque" "non detecte" 'ok' "Rien a signaler." }
+
+    # 3. Sante du disque
+    Ana-Step 3 "sante du disque"
+    try {
+        $bad=@(Get-PhysicalDisk -EA Stop | Where-Object { "$($_.HealthStatus)" -ne 'Healthy' })
+        if ($bad.Count -eq 0) { Add-AnaResult "Sante du disque" "aucun signe de faiblesse" 'ok' "Vos donnees sont sur un disque en bonne sante." }
+        else { Add-AnaResult "Sante du disque" "$($bad.Count) disque(s) en alerte" 'ko' "Sauvegardez vos documents SANS ATTENDRE et faites verifier le disque." }
+    } catch {
+        try {
+            $dd=@(Get-CimInstance Win32_DiskDrive -EA Stop | Where-Object { $_.Status -ne 'OK' })
+            if ($dd.Count -eq 0) { Add-AnaResult "Sante du disque" "aucun signe de faiblesse" 'ok' "Vos donnees sont sur un disque en bonne sante." }
+            else { Add-AnaResult "Sante du disque" "etat anormal signale" 'ko' "Sauvegardez vos documents et faites verifier le disque." }
+        } catch { Add-AnaResult "Sante du disque" "impossible a lire" 'warn' "Relancez l'analyse." }
+    }
+
+    # 4. Memoire installee
+    Ana-Step 4 "memoire installee"
+    try {
+        $ramGo2=[math]::Round((Get-CimInstance Win32_ComputerSystem -EA Stop).TotalPhysicalMemory/1GB,0)
+        if ($ramGo2 -ge 8) { Add-AnaResult "Memoire installee" "$ramGo2 Go" 'ok' "C'est suffisant pour un usage courant." }
+        elseif ($ramGo2 -ge 4) { Add-AnaResult "Memoire installee" "$ramGo2 Go" 'warn' "8 Go est le confort minimum aujourd'hui : un ajout de memoire aiderait." }
+        else { Add-AnaResult "Memoire installee" "$ramGo2 Go" 'ko' "Trop peu pour Windows recent : c'est la cause n.1 des lenteurs ici." }
+    } catch { Add-AnaResult "Memoire installee" "impossible a lire" 'warn' "Relancez l'analyse." }
+
+    # 5. Memoire utilisee + programmes gourmands
+    Ana-Step 5 "programmes gourmands"
+    try {
+        $os3=Get-CimInstance Win32_OperatingSystem -EA Stop
+        $ramUseP=[int]((($os3.TotalVisibleMemorySize-$os3.FreePhysicalMemory)/$os3.TotalVisibleMemorySize)*100)
+        $top=(Get-Process -EA SilentlyContinue | Sort-Object WorkingSet64 -Descending |
+              Select-Object -First 3 | ForEach-Object { $_.ProcessName }) -join ', '
+        $tx="$ramUseP% utilisee - les plus gourmands : $top"
+        if ($ramUseP -lt 75) { Add-AnaResult "Memoire en ce moment" $tx 'ok' "Tout va bien." }
+        elseif ($ramUseP -lt 90) { Add-AnaResult "Memoire en ce moment" $tx 'warn' "Fermez les programmes que vous n'utilisez pas." }
+        else { Add-AnaResult "Memoire en ce moment" $tx 'ko' "Memoire saturee : redemarrez et fermez les gros programmes." }
+    } catch { Add-AnaResult "Memoire en ce moment" "impossible a lire" 'warn' "Relancez l'analyse." }
+
+    # 6. Programmes au demarrage
+    Ana-Step 6 "programmes au demarrage"
+    try {
+        $nStart=@(Get-CimInstance Win32_StartupCommand -EA Stop).Count
+        if ($nStart -le 8) { Add-AnaResult "Programmes au demarrage" "$nStart programme(s) se lancent avec Windows" 'ok' "C'est raisonnable." }
+        elseif ($nStart -le 14) { Add-AnaResult "Programmes au demarrage" "$nStart programmes se lancent avec Windows" 'warn' "Desactivez les inutiles : Ctrl+Maj+Echap, onglet Demarrage." }
+        else { Add-AnaResult "Programmes au demarrage" "$nStart programmes se lancent avec Windows" 'ko' "C'est beaucoup ! Ils ralentissent l'allumage : Ctrl+Maj+Echap, onglet Demarrage." }
+    } catch { Add-AnaResult "Programmes au demarrage" "impossible a lire" 'warn' "Relancez l'analyse." }
+
+    # 7. Mises a jour Windows
+    Ana-Step 7 "mises a jour Windows"
+    try {
+        $lastFix=(Get-HotFix -EA Stop | Where-Object { $_.InstalledOn } | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn
+        if ($lastFix) {
+            $ageJ=[int]((Get-Date)-$lastFix).TotalDays
+            $tx="derniere mise a jour il y a $ageJ jour(s)"
+            if ($ageJ -le 45) { Add-AnaResult "Mises a jour Windows" $tx 'ok' "Votre Windows est a jour." }
+            elseif ($ageJ -le 90) { Add-AnaResult "Mises a jour Windows" $tx 'warn' "Passez les mises a jour (bouton dans l'onglet Conseils)." }
+            else { Add-AnaResult "Mises a jour Windows" $tx 'ko' "Tres en retard : les mises a jour corrigent des failles. Lancez-les." }
+        } else { Add-AnaResult "Mises a jour Windows" "aucune date lisible" 'warn' "Ouvrez Windows Update pour verifier." }
+    } catch { Add-AnaResult "Mises a jour Windows" "impossible a lire" 'warn' "Ouvrez Windows Update pour verifier." }
+
+    # 8. Protection (antivirus + pare-feu)
+    Ana-Step 8 "protection du PC"
+    try {
+        $mp=Get-MpComputerStatus -EA Stop
+        $fwOff=@(Get-NetFirewallProfile -EA SilentlyContinue | Where-Object { -not $_.Enabled }).Count
+        if ($mp.RealTimeProtectionEnabled -and $fwOff -eq 0) {
+            Add-AnaResult "Protection du PC" "antivirus et pare-feu actifs" 'ok' "Vous etes protege."
+        } elseif (-not $mp.RealTimeProtectionEnabled -and $mp.AMRunningMode -match 'Passive') {
+            Add-AnaResult "Protection du PC" "un autre antivirus est aux commandes" 'ok' "Defender laisse la place a votre antivirus : normal."
+        } else {
+            Add-AnaResult "Protection du PC" "protection incomplete" 'ko' "Reactivez l'antivirus/le pare-feu dans Securite Windows."
+        }
+    } catch { Add-AnaResult "Protection du PC" "impossible a verifier" 'warn' "Ouvrez Securite Windows pour controler." }
+
+    # 9. Dernier redemarrage
+    Ana-Step 9 "dernier redemarrage"
+    try {
+        $os4=Get-CimInstance Win32_OperatingSystem -EA Stop
+        $up2=(Get-Date)-$os4.LastBootUpTime
+        if ($up2.Days -lt 4) { Add-AnaResult "Dernier redemarrage" "il y a $($up2.Days) jour(s)" 'ok' "Bien, votre PC est frais." }
+        elseif ($up2.Days -lt 10) { Add-AnaResult "Dernier redemarrage" "il y a $($up2.Days) jours" 'warn' "Pensez a redemarrer bientot." }
+        else { Add-AnaResult "Dernier redemarrage" "il y a $($up2.Days) jours" 'ko' "Redemarrez : ca regle beaucoup de lenteurs." }
+    } catch { Add-AnaResult "Dernier redemarrage" "impossible a lire" 'warn' "Relancez l'analyse." }
+
+    # 10. Dossiers qui debordent
+    Ana-Step 10 "dossiers volumineux"
+    try {
+        $dlMB=Get-FolderMB (Join-Path $env:USERPROFILE 'Downloads')
+        $tmpMB=(Get-FolderMB $env:TEMP)+(Get-FolderMB "$env:SystemRoot\Temp")
+        $tx="Telechargements {0:N1} Go - fichiers temporaires {1:N1} Go" -f ($dlMB/1024),($tmpMB/1024)
+        if ($dlMB -gt 15000) { Add-AnaResult "Dossiers qui debordent" $tx 'ko' "Des dizaines de Go dorment dans Telechargements : triez-les." }
+        elseif ($dlMB -gt 5000 -or $tmpMB -gt 3000) { Add-AnaResult "Dossiers qui debordent" $tx 'warn' "Un tri des Telechargements et un menage libereraient de la place." }
+        else { Add-AnaResult "Dossiers qui debordent" $tx 'ok' "Rien d'anormal." }
+    } catch { Add-AnaResult "Dossiers qui debordent" "impossible a mesurer" 'ok' "Rien d'anormal." }
+
+    # Note sur 20
+    $pts=0
+    foreach ($r in $Script:AnaResults) { $pts += switch($r[2]){ 'ok'{2} 'warn'{1} default{0} } }
+    $Script:AnaScore=$pts
+    $lblAna.Text=""
+}
+
+$bAna.Add_Click({
+    $pnlAna.Controls.Clear()
+    $bAna.Enabled=$false; $bAnaPdf.Enabled=$false; $F.Cursor='WaitCursor'
+    try {
+        Run-Analyse
+        # Carte de note
+        $sc=$Script:AnaScore
+        $scCol= if ($sc -ge 17){$Green} elseif ($sc -ge 12){$Orange} else {$Red}
+        $scTxt= if ($sc -ge 17){"En pleine forme !"} elseif ($sc -ge 12){"Correct - quelques reglages conseilles"} else {"Votre PC a besoin de soins"}
+        $cardS=New-Card 0 0 780 70; $pnlAna.Controls.Add($cardS)
+        $ln=New-Label "Note : $sc / 20" 20 8 240 34 $true
+        $ln.Font=[Drawing.Font]::new("Segoe UI",16,[Drawing.FontStyle]::Bold); $ln.ForeColor=$scCol; $ln.BackColor=$CardBg
+        $cardS.Controls.Add($ln)
+        $lv2=New-Label $scTxt 20 42 500 22; $lv2.ForeColor=$Mute; $lv2.BackColor=$CardBg; $cardS.Controls.Add($lv2)
+        $ld2=New-Label ("Analyse du " + $Script:AnaDate.ToString('dd/MM/yyyy HH:mm')) 540 24 230 24
+        $ld2.ForeColor=$Mute; $ld2.BackColor=$CardBg; $cardS.Controls.Add($ld2)
+        # Cartes de resultats
+        $y=82
+        foreach ($r in $Script:AnaResults) { Add-AnaCard $y $r[0] $r[1] $r[2] $r[3]; $y+=72 }
+        $pnlAna.Refresh()
+        $bAnaPdf.Enabled=$true
+        Write-Log "ANALYSE (note $sc/20)"
+    } finally { $bAna.Enabled=$true; $F.Cursor='Default' }
+})
+
+function Find-EdgeP {
+    foreach ($p in @("$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+                     "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe")) {
+        if (Test-Path $p) { return $p }
+    }
+    return $null
+}
+$bAnaPdf.Add_Click({
+    if ($Script:AnaResults.Count -eq 0) { Dlg-OK "Lancez d'abord l'analyse."; return }
+    $sc=$Script:AnaScore
+    $scHex= if ($sc -ge 17){'#22a06b'} elseif ($sc -ge 12){'#e08a1e'} else {'#d14545'}
+    $scTxt= if ($sc -ge 17){"En pleine forme !"} elseif ($sc -ge 12){"Correct - quelques reglages conseilles"} else {"Votre PC a besoin de soins"}
+    $rows=""
+    foreach ($r in $Script:AnaResults) {
+        $hex= switch($r[2]){ 'ok'{'#22a06b'} 'warn'{'#e08a1e'} default{'#d14545'} }
+        $lab= switch($r[2]){ 'ok'{'Bon'} 'warn'{'A surveiller'} default{'A corriger'} }
+        $rows+="<tr><td><span style='display:inline-block;width:12px;height:12px;border-radius:6px;background:$hex'></span></td>" +
+               "<td><b>$($r[0])</b><br><span style='color:#6b7280'>$($r[1])</span></td>" +
+               "<td style='color:$hex;font-weight:600'>$lab</td><td>$($r[3])</td></tr>"
+    }
+    $now2=$Script:AnaDate.ToString('dd/MM/yyyy HH:mm')
+    $html="<!DOCTYPE html><html lang='fr'><head><meta charset='utf-8'><title>Rapport d'analyse - PC Malin</title>" +
+        "<style>body{font-family:'Segoe UI',Arial,sans-serif;margin:30px;color:#2a2e36;font-size:13px}" +
+        "h1{color:#1fa8b4;font-size:22px;margin:0}" +
+        ".sub{color:#6b7280;margin:4px 0 18px}" +
+        ".score{font-size:26px;font-weight:700;color:$scHex;margin:10px 0 2px}" +
+        "table{width:100%;border-collapse:collapse;margin-top:14px}" +
+        "td{border-bottom:1px solid #e2e8f0;padding:9px 8px;vertical-align:top}" +
+        ".foot{margin-top:24px;color:#9aa0aa;font-size:11px}</style></head><body>" +
+        "<h1>Rapport d'analyse - PC Malin</h1>" +
+        "<div class='sub'>Ordinateur $env:COMPUTERNAME &bull; $now2</div>" +
+        "<div class='score'>Note : $sc / 20</div><div style='color:#6b7280'>$scTxt</div>" +
+        "<table>$rows</table>" +
+        "<div class='foot'>Genere par PC Malin - analyse en lecture seule : rien n'a ete modifie sur l'ordinateur, aucune donnee n'a ete envoyee.</div>" +
+        "</body></html>"
+    $dir2=$null
+    foreach ($cand in @([Environment]::GetFolderPath('MyDocuments'),[Environment]::GetFolderPath('Desktop'),$env:TEMP)) {
+        try { $probe=Join-Path $cand ("~pm_"+[guid]::NewGuid().ToString('N')+".tmp")
+              [IO.File]::WriteAllText($probe,"x"); Remove-Item $probe -Force -EA SilentlyContinue; $dir2=$cand; break } catch {}
+    }
+    $out2=Join-Path $dir2 ("Rapport-analyse-PC-Malin-"+(Get-Date -Format 'yyyyMMdd-HHmm')+".pdf")
+    try {
+        $edge2=Find-EdgeP
+        if ($edge2) {
+            $tmp2=Join-Path $env:TEMP ("pm_"+[guid]::NewGuid().ToString('N')+".html")
+            [IO.File]::WriteAllText($tmp2,$html,[Text.UTF8Encoding]::new($false))
+            Start-Process -FilePath $edge2 -Wait -WindowStyle Hidden -ArgumentList `
+                "--headless","--disable-gpu","--no-first-run",
+                "--print-to-pdf-no-header","--print-to-pdf=`"$out2`"","`"file:///$($tmp2 -replace '\\','/')`""
+            Remove-Item $tmp2 -Force -EA SilentlyContinue
+            if (-not (Test-Path $out2)) { throw "conversion PDF impossible" }
+        } else {
+            $out2=[IO.Path]::ChangeExtension($out2,'html')
+            [IO.File]::WriteAllText($out2,$html,[Text.UTF8Encoding]::new($false))
+        }
+        Write-Log "ANALYSE rapport : $out2"
+        Dlg-OK "Rapport enregistre :`n$out2"
+        Start-Process $out2
+    } catch {
+        Dlg-OK "Impossible d'enregistrer le rapport :`n$($_.Exception.Message)"
+    }
+})
+
+
+# ════════════════════════════════════════════════════════════════
+#  ONGLET 5 : CONSEILS
 # ════════════════════════════════════════════════════════════════
 $t4 = New-Tab "Conseils"; $TC.TabPages.Add($t4)
 $t4.Controls.Add((New-Label "Quelques bons reflexes pour garder un PC en forme" 0 4 700 28 $true))
@@ -472,9 +733,10 @@ $tiles = @(
     @{ t="Mon ordinateur"; s="Voir les infos de votre PC"; tab=0; c=$Blue;   ic="pc" },
     @{ t="Faire le menage"; s="Liberer de l'espace"; tab=1; c=$Green;  ic="broom" },
     @{ t="Bilan de sante"; s="Verifier que tout va bien"; tab=2; c=$Teal;   ic="health" },
-    @{ t="Conseils"; s="Bien entretenir son PC"; tab=3; c=$Purple; ic="bulb" }
+    @{ t="Analyser mon PC"; s="Comprendre pourquoi ca rame"; tab=3; c=$Orange; ic="scan" },
+    @{ t="Conseils"; s="Bien entretenir son PC"; tab=4; c=$Purple; ic="bulb" }
 )
-$tw=396; $th=150; $gap=24; $ox=40; $oy=126
+$tw=396; $th=118; $gap=18; $ox=40; $oy=120
 for ($i=0; $i -lt $tiles.Count; $i++) {
     $ti=$tiles[$i]; $col=$i%2; $row=[math]::Floor($i/2)
     $px=$ox+$col*($tw+$gap); $py=$oy+$row*($th+$gap)
@@ -483,13 +745,13 @@ for ($i=0; $i -lt $tiles.Count; $i++) {
     $tile.BackColor=$CardBg; $tile.Cursor='Hand'; $tile.Tag=$ti
 
     $iconP=[System.Windows.Forms.Panel]::new()
-    $iconP.Location=[Drawing.Point]::new(28,34); $iconP.Size=[Drawing.Size]::new(64,64); $iconP.BackColor=$CardBg
+    $iconP.Location=[Drawing.Point]::new(28,27); $iconP.Size=[Drawing.Size]::new(64,64); $iconP.BackColor=$CardBg
     $iconP.Tag=@{ ic=$ti.ic; c=$ti.c }
     $iconP.Add_Paint({ param($sndr,$e) Draw-Icon $e.Graphics $sndr.Tag.ic $sndr.Tag.c 8 6 50 })
     $tile.Controls.Add($iconP)
 
-    $tl=New-Label $ti.t 116 38 262 30 $true; $tl.Font=[Drawing.Font]::new("Segoe UI",14,[Drawing.FontStyle]::Bold); $tile.Controls.Add($tl)
-    $sl=New-Label $ti.s 116 74 262 40; $sl.ForeColor=$Mute; $tile.Controls.Add($sl)
+    $tl=New-Label $ti.t 116 22 262 30 $true; $tl.Font=[Drawing.Font]::new("Segoe UI",14,[Drawing.FontStyle]::Bold); $tile.Controls.Add($tl)
+    $sl=New-Label $ti.s 116 58 262 40; $sl.ForeColor=$Mute; $tile.Controls.Add($sl)
 
     $enter={ param($sndr,$e)
         $x=$sndr; while ($x -and -not ($x.Tag -is [hashtable] -and $x.Tag.ContainsKey('tab'))) { $x=$x.Parent }
