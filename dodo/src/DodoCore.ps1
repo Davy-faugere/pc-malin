@@ -500,6 +500,12 @@ function Get-DodoState {
 
 function Get-DodoPendingWarnings {
     <#
+        CONVENTION DE RETOUR (valable pour toutes les fonctions de listes du
+        projet) : pas de virgule devant le return, et l'appelant enveloppe
+        l'appel dans @(...). Melanger les deux fait qu'un resultat vide
+        devient un tableau d'UN element - le tableau vide lui-meme - et
+        Count vaut 1 au lieu de 0.
+
         Seuils d'alerte a declencher maintenant, compte tenu de ceux deja emis.
         Robuste a un reveil tardif : si l'agent a saute un tour, tous les seuils
         depasses sont rattrapes en une fois (et le message annonce le temps REEL
@@ -510,13 +516,13 @@ function Get-DodoPendingWarnings {
         [Parameter(Mandatory = $true)]$Config,
         [string[]]$AlreadyFired = @()
     )
-    if ($State.State -ne 'Warning') { return ,@() }
+    if ($State.State -ne 'Warning') { return @() }
     $due = @()
     foreach ($t in (@($Config.warningMinutes) | Sort-Object -Descending)) {
         $ti = [int]$t
         if ($State.MinutesToBlock -le $ti -and ($AlreadyFired -notcontains "$ti")) { $due += $ti }
     }
-    return ,@($due)
+    return @($due)
 }
 
 function Format-DodoMessage {

@@ -109,7 +109,7 @@ if ($null -ne $exc) {
 
 # --- Compte adulte connecte
 if (@($cfg.exemptUsers).Count -gt 0) {
-    $open = Get-DodoInteractiveUsers
+    $open = @(Get-DodoInteractiveUsers)
     foreach ($u in $open) {
         if (@($cfg.exemptUsers) -contains $u) {
             Log "Extinction suspendue : session ouverte par le compte exempte '$u'." 'WARN'

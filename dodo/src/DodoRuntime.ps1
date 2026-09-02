@@ -410,7 +410,10 @@ function Get-DodoUserWriteRights {
         $eff = [int]$ace.FileSystemRights -band $masque
         if ($eff -ne 0) { $trouves.Add(([System.Security.AccessControl.FileSystemRights]$eff).ToString()) }
     }
-    return ,$trouves.ToArray()
+    # PAS de virgule devant le retour : les appelants enveloppent l'appel dans
+    # @(...). Avec ",", @() recevrait UN element - le tableau vide lui-meme -
+    # et Count vaudrait 1 au lieu de 0, signalant une ecriture inexistante.
+    return $trouves.ToArray()
 }
 
 function Get-DodoInteractiveUsers {
@@ -433,5 +436,5 @@ function Get-DodoInteractiveUsers {
         }
     }
     catch { }
-    return ,$users.ToArray()
+    return $users.ToArray()
 }

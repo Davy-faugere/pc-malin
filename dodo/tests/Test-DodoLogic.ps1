@@ -207,17 +207,17 @@ Assert-Equal 'Blocked' (St '2026-10-25 04:00').State 'nuit du passage a l heure 
 
 # --------------------------------------------------------------------------
 Write-Section 'Sequencement des alertes sonores'
-$w7 = Get-DodoPendingWarnings (St '2026-09-02 20:53') $cfg @()
+$w7 = @(Get-DodoPendingWarnings (St '2026-09-02 20:53') $cfg @())
 Assert-Equal '10' ($w7 -join ',') 'a 7 min restantes, seul le seuil 10 est du'
-$w7b = Get-DodoPendingWarnings (St '2026-09-02 20:53') $cfg @('10')
+$w7b = @(Get-DodoPendingWarnings (St '2026-09-02 20:53') $cfg @('10'))
 Assert-Equal '' ($w7b -join ',') 'seuil 10 deja emis : rien a rejouer'
-$w3 = Get-DodoPendingWarnings (St '2026-09-02 20:57') $cfg @('10')
+$w3 = @(Get-DodoPendingWarnings (St '2026-09-02 20:57') $cfg @('10'))
 Assert-Equal '5' ($w3 -join ',') 'a 3 min restantes, le seuil 5 est du'
-$wCatchUp = Get-DodoPendingWarnings (St '2026-09-02 20:59') $cfg @()
+$wCatchUp = @(Get-DodoPendingWarnings (St '2026-09-02 20:59') $cfg @())
 Assert-Equal '10,5,2,1' ($wCatchUp -join ',') 'agent endormi : rattrapage de tous les seuils'
-$wNone = Get-DodoPendingWarnings (St '2026-09-02 18:00') $cfg @()
+$wNone = @(Get-DodoPendingWarnings (St '2026-09-02 18:00') $cfg @())
 Assert-Equal 0 $wNone.Count 'hors preavis : aucune alerte'
-$wBlocked = Get-DodoPendingWarnings (St '2026-09-02 22:00') $cfg @()
+$wBlocked = @(Get-DodoPendingWarnings (St '2026-09-02 22:00') $cfg @())
 Assert-Equal 0 $wBlocked.Count 'deja bloque : aucune alerte de preavis'
 
 # --------------------------------------------------------------------------

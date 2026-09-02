@@ -134,7 +134,7 @@ try {
         $ecrivables = @()
         try { $ecrivables = @(Get-DodoUserWriteRights -Path $d) }
         catch { $ecrivables += "ACL illisible : $($_.Exception.Message)" }
-        Chk ($ecrivables.Count -eq 0) "groupe Utilisateurs sans ecriture sur $(Split-Path -Leaf $d)" ($ecrivables -join ', ')
+        Chk ($ecrivables.Count -eq 0) "groupe Utilisateurs sans ecriture sur $(Split-Path -Leaf $d)" ([string]::Join(', ', @($ecrivables)))
         $sidU = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
         $lecture = @((Get-Acl -LiteralPath $d).Access | Where-Object {
             $x = $null; try { $x = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) } catch { }

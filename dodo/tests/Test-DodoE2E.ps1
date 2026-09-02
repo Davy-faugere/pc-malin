@@ -164,7 +164,7 @@ if (& $want 'security') {
         $bad = @()
         try { $bad = @(Get-DodoUserWriteRights -Path $d) }
         catch { $bad += "ACL illisible : $($_.Exception.Message)" }
-        Chk ($bad.Count -eq 0) "le groupe Utilisateurs ne peut pas ecrire dans $(Split-Path -Leaf $d)" ($bad -join ', ')
+        Chk ($bad.Count -eq 0) "le groupe Utilisateurs ne peut pas ecrire dans $(Split-Path -Leaf $d)" ([string]::Join(', ', @($bad)))
     }
 
     $admins = @()

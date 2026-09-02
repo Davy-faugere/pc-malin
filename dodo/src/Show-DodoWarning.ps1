@@ -51,9 +51,9 @@ function Get-DodoVoices {
                 [pscustomobject]@{ Name = $_.VoiceInfo.Name; Culture = $_.VoiceInfo.Culture.Name; Gender = $_.VoiceInfo.Gender }
             })
         $s.Dispose()
-        return ,$v
+        return $v
     }
-    catch { return ,@() }
+    catch { return @() }
 }
 
 function Start-DodoSound {
@@ -160,7 +160,7 @@ function Show-DodoPopup {
 # --------------------------------------------------------------------------
 try {
     if ($ListVoices) {
-        $v = Get-DodoVoices
+        $v = @(Get-DodoVoices)
         if ($v.Count -eq 0) { Write-Host 'Aucune voix SAPI5 exploitable sur ce poste.' -ForegroundColor Yellow }
         else { $v | Format-Table -AutoSize | Out-String | Write-Host }
         Write-Host "Note : les voix 'modernes' de Windows 11 (Speech_OneCore) ne sont pas visibles par System.Speech." -ForegroundColor DarkGray
@@ -185,7 +185,7 @@ try {
         D 'Dossier media'   $paths.Media                (Test-Path -LiteralPath $paths.Media)
         D 'warning.wav'     (Join-Path $paths.Media 'warning.wav')  (Test-Path -LiteralPath (Join-Path $paths.Media 'warning.wav'))
         D 'Journal utilisateur' $userDir
-        $vv = Get-DodoVoices
+        $vv = @(Get-DodoVoices)
         D 'Voix SAPI5'      ("{0} trouvee(s)" -f $vv.Count) ($vv.Count -gt 0)
         foreach ($x in $vv) { Write-Host ("      - {0} [{1}]" -f $x.Name, $x.Culture) -ForegroundColor DarkGray }
         $wf = $true
@@ -247,7 +247,7 @@ try {
 
     $fired = @(Get-ChildItem -LiteralPath $userDir -Filter "fired-$tag-*.txt" -File -ErrorAction SilentlyContinue |
         ForEach-Object { ($_.BaseName -split '-')[-1] })
-    $due = Get-DodoPendingWarnings -State $state -Config $cfg -AlreadyFired $fired
+    $due = @(Get-DodoPendingWarnings -State $state -Config $cfg -AlreadyFired $fired)
     if ($due.Count -eq 0) { exit 0 }
 
     foreach ($t in $due) { Write-DodoText -Path (Join-Path $userDir "fired-$tag-$t.txt") -Content (Get-Date).ToString('o') }

@@ -302,7 +302,7 @@ if ($LASTEXITCODE -ne 0) { Warn "icacls /inheritance a signale un probleme : $($
 $writable = @()
 foreach ($d in @($paths.Bin, $paths.Etc, $paths.Var, $paths.Logs)) {
     try {
-        if ((Get-DodoUserWriteRights -Path $d).Count -gt 0) { $writable += (Split-Path -Leaf $d) }
+        if (@(Get-DodoUserWriteRights -Path $d).Count -gt 0) { $writable += (Split-Path -Leaf $d) }
     }
     catch { Warn "ACL de $d illisible : $($_.Exception.Message)" }
 }

@@ -105,7 +105,7 @@ function Get-Ssids {
             if ($v -and $v -notmatch '^<' -and -not $l.Contains($v)) { $l.Add($v) }
         }
     }
-    return ,$l.ToArray()
+    return $l.ToArray()
 }
 # Cartes typiquement utilisees pour partager la connexion d'un telephone :
 # elles sont decochees d'office : les autoriser viderait la mesure de son sens.
@@ -416,7 +416,7 @@ $g3.Controls.Add($chkNet)
 New-Lbl 'Wi-Fi de la maison :' 16 52 120 $g3 | Out-Null
 $cbSsid = New-Object System.Windows.Forms.ComboBox
 $cbSsid.SetBounds(140, 49, 300, 24); $cbSsid.DropDownStyle = 'DropDown'
-foreach ($s in (Get-Ssids)) { [void]$cbSsid.Items.Add($s) }
+foreach ($s in @(Get-Ssids)) { [void]$cbSsid.Items.Add($s) }
 if ($cbSsid.Items.Count -gt 0) { $cbSsid.SelectedIndex = 0 }
 $g3.Controls.Add($cbSsid)
 
@@ -540,7 +540,7 @@ $btnDemote.Add_Click({
 
 $btnSsid.Add_Click({
     $cbSsid.Items.Clear()
-    foreach ($s in (Get-Ssids)) { [void]$cbSsid.Items.Add($s) }
+    foreach ($s in @(Get-Ssids)) { [void]$cbSsid.Items.Add($s) }
     if ($cbSsid.Items.Count -gt 0) { $cbSsid.SelectedIndex = 0 }
     Fill-Adapters
     Log "OK   $($cbSsid.Items.Count) réseau(x) et $($lstAd.Items.Count) carte(s) détecté(s)."
