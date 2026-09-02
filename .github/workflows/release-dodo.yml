@@ -120,8 +120,11 @@ jobs:
             lancement Windows peut afficher « Windows a protégé votre PC » →
             *Informations complémentaires* → *Exécuter quand même*. Les deux livrables
             sont construits par GitHub Actions depuis les sources de ce dépôt, et la
-            construction rejoue les 119 tests du noyau ainsi que la vérification de la
-            charge utile embarquée — tout est visible dans l'onglet Actions.
+            publication est conditionnée à trois étapes vertes : l'intégralité des tests
+            du noyau, la recette d'intégration sur une machine Windows réelle
+            (installation, droits, tâches planifiées, agents, désinstallation) et la
+            vérification de la charge utile embarquée — tout est visible dans l'onglet
+            Actions.
 
             ### Pré-release
             Version de validation : à éprouver sur un PC d'essai avant déploiement.
