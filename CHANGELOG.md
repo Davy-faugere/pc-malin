@@ -13,10 +13,14 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/) · Versioning : [Sem
   - **blocage du partage de connexion** sur le portable : filtre SSID Wi-Fi et désactivation de toute carte réseau non recensée
   - dérogation ponctuelle accordée par un parent (`Add-DodoException.ps1`)
   - journal horodaté local et journal Windows *Application* (source `Dodo`)
-  - **118 tests de logique hors ligne** et une **recette bout-en-bout** en 8 phases, dont une soirée complète rejouée en une minute et un test de vraie extinction à usage unique
+  - **`Dodo-Installateur.exe`** — assistant graphique auto-élevé (UAC), sans aucune commande à taper : choix du compte de l'enfant avec alerte et retrait des droits administrateur en un clic, comptes adultes exemptés, détection du Wi-Fi de la maison et des cartes réseau, mode simulation ou mise en service, puis boutons *Voir l'état*, *Tester une soirée* et *Désinstaller*. Variante `.cmd` lisible dans le Bloc-notes, comme PC Malin
+  - **119 tests de logique hors ligne** et une **recette bout-en-bout** en 8 phases, dont une soirée complète rejouée en une minute et un test de vraie extinction à usage unique
+
+### Corrigé
+- `Install-Dodo.ps1` : `icacls /inheritance:r /T` était appliqué **avant** `/grant`, ce qui vidait les droits de la racine, faisait perdre l'accès au processus et échouait en « Accès refusé » sur les sous-dossiers. Les droits explicites sont désormais posés d'abord, l'héritage n'est coupé que sur la racine, et le résultat est vérifié par lecture effective des ACL
 
 ### Précision
-- Dodo n'est pas embarqué dans `PC-Malin.exe` / `PC-Malin.cmd` : c'est un outil distinct, déployé par ses propres scripts
+- Dodo n'est pas embarqué dans `PC-Malin.exe` / `PC-Malin.cmd` : c'est un outil distinct, avec son propre installateur
 
 ## [1.2.0] - 2026-07-18
 

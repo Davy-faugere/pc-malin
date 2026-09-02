@@ -261,10 +261,18 @@ Assert-Equal 'Allowed' $st.State 'Get-DodoState accepte une List[object] de peri
 # --------------------------------------------------------------------------
 Write-Section 'Purete ASCII des sources (accents interdits hors messages JSON)'
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
+# Regle : un .ps1 est soit en ASCII pur, soit en UTF-8 AVEC BOM. Sans BOM,
+# Windows PowerShell 5.1 lit le fichier en ANSI et casse les accents.
 foreach ($f in (Get-ChildItem -Path $srcDir, $PSScriptRoot -Filter '*.ps1' -File)) {
-    $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
-    $bad   = @($bytes | Where-Object { $_ -gt 127 }).Count
-    Assert-Equal 0 $bad ("$($f.Name) : aucun octet > 127 (compatibilite Windows PowerShell 5.1 sans BOM)")
+    $bytes  = [System.IO.File]::ReadAllBytes($f.FullName)
+    $hasBom = ($bytes.Count -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+    $bad    = @($bytes | Where-Object { $_ -gt 127 }).Count
+    if ($hasBom) {
+        Assert-Equal $true $true ("$($f.Name) : UTF-8 avec BOM, accents autorises")
+    }
+    else {
+        Assert-Equal 0 $bad ("$($f.Name) : ASCII pur (pas de BOM, donc pas d'accent possible)")
+    }
 }
 
 # --------------------------------------------------------------------------

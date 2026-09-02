@@ -145,11 +145,48 @@ else { Ok 'Messages parles existants conserves' }
 Step 'Verrouillage des droits (l enfant ne doit pas pouvoir modifier)'
 
 # SID bien connus : insensible a la langue du systeme.
-& icacls.exe $paths.Root /inheritance:r /T /C 2>&1 | Out-Null
-& icacls.exe $paths.Root /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /T /C 2>&1 | Out-Null
-$acl = (& icacls.exe $paths.Root) 2>&1
-Ok 'Heritage coupe ; SYSTEM et Administrateurs en controle total, Utilisateurs en lecture/execution'
-foreach ($l in @($acl)) { if ($l -match 'S-1-|:\(') { Info $l.Trim() } }
+#   S-1-5-18     SYSTEM               controle total
+#   S-1-5-32-544 Administrateurs      controle total
+#   S-1-5-32-545 Utilisateurs         lecture / execution seulement
+#
+# ORDRE IMPORTANT : les droits explicites sont poses AVANT de couper
+# l'heritage. Dans l'autre sens, la racine se retrouve un instant sans
+# aucune ACE, le processus perd son droit de parcours, et icacls echoue
+# aussitot en "Acces refuse" sur les sous-dossiers.
+$grant = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F', '*S-1-5-32-545:(OI)(CI)RX')
+$o1 = & icacls.exe $paths.Root /grant:r @grant /T /C 2>&1
+if ($LASTEXITCODE -ne 0) { Warn "icacls /grant a signale un probleme : $($o1 -join ' ')" }
+
+# Heritage coupe sur la RACINE uniquement : les sous-dossiers heritent
+# desormais des ACE explicites ci-dessus. Avec /T ils perdraient tout.
+$o2 = & icacls.exe $paths.Root /inheritance:r /C 2>&1
+if ($LASTEXITCODE -ne 0) { Warn "icacls /inheritance a signale un probleme : $($o2 -join ' ')" }
+
+# Verification effective plutot que declarative
+$usersSid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
+$writable = @()
+foreach ($d in @($paths.Bin, $paths.Etc, $paths.Var, $paths.Logs)) {
+    try {
+        foreach ($ace in (Get-Acl -LiteralPath $d).Access) {
+            if ($ace.AccessControlType -ne 'Allow') { continue }
+            $sid = $null
+            try { $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) } catch { }
+            if ($null -eq $sid -or $sid -ne $usersSid) { continue }
+            if (($ace.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Write) -ne 0 -or
+                ($ace.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify) -ne 0) {
+                $writable += (Split-Path -Leaf $d)
+            }
+        }
+    }
+    catch { Warn "ACL de $d illisible : $($_.Exception.Message)" }
+}
+if ($writable.Count -eq 0) {
+    Ok 'Heritage coupe ; SYSTEM et Administrateurs en controle total, Utilisateurs en lecture seule'
+}
+else {
+    Warn ('Le groupe Utilisateurs peut encore ecrire dans : ' + (($writable | Select-Object -Unique) -join ', '))
+}
+foreach ($l in @(& icacls.exe $paths.Root 2>&1)) { if ($l -match 'S-1-|:\(') { Info $l.Trim() } }
 
 # --------------------------------------------------------------------------
 Step 'Source de journal Windows'

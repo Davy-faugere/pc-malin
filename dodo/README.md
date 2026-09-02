@@ -18,7 +18,12 @@ la décision est prise localement, sans dépendre du réseau.
 
 ```
 dodo/
+  build/
+    build.sh                  construit l'exe et le cmd (python3, zip, mono-mcs)
+    launcher.cs               lanceur natif : élévation UAC + extraction
+    header.cmd                en-tête de la version .cmd auto-extractible
   src/
+    Assistant-Dodo.ps1        assistant graphique (embarqué dans l'exe)
     DodoCore.ps1              noyau de décision — 100 % pur, sans effet de bord
     DodoRuntime.ps1           fichiers, cache calendrier, journal
     Invoke-DodoEnforce.ps1    agent SYSTEM : c'est lui, et lui seul, qui éteint
@@ -39,19 +44,35 @@ dodo/
     03-exploitation.md        exploitation, réglages, limites, diagnostic
 ```
 
-## Démarrage rapide (PC d'essai)
+## Démarrage rapide — double-clic
+
+**`Dodo-Installateur.exe`** : Windows demande l'autorisation, l'assistant s'ouvre.
+Aucune commande à taper.
+
+L'assistant fait tout : il liste les comptes locaux, signale si l'enfant est
+administrateur (et propose de l'en retirer d'un clic), détecte le Wi-Fi de la
+maison et les cartes réseau, puis installe. Trois boutons complètent l'écran :
+**Voir l'état**, **Tester une soirée**, **Désinstaller**.
+
+Par défaut il installe en **simulation** : rien ne s'éteint tant que vous n'avez
+pas basculé sur *Mise en service*.
+
+> `Dodo-Installateur.cmd` fait exactement la même chose, en fichier texte lisible
+> dans le Bloc-notes avant lancement — même logique que PC Malin.
+
+<details>
+<summary>Ligne de commande, pour un déploiement en série</summary>
 
 ```powershell
 # PowerShell EN ADMINISTRATEUR
 cd .\dodo\src
-.\Install-Dodo.ps1              # installe en mode SIMULATION : rien ne s'éteint
-.\Get-DodoStatus.ps1            # état, calendrier, prévisionnel sur 14 nuits
-
-cd ..\tests
-.\Test-DodoE2E.ps1              # recette complète, ~2 min, avec voix et fenêtres
+.\Install-Dodo.ps1                                    # simulation
+.\Install-Dodo.ps1 -Production -ExemptUsers 'Papa' `
+    -AllowedSsid 'MON-WIFI' -EnableAdapterGuard        # mise en service, portable
+.\Get-DodoStatus.ps1
+cd ..\tests ; .\Test-DodoE2E.ps1
 ```
-
-Quand tout est vert : `.\Install-Dodo.ps1 -Production -ExemptUsers 'Papa'`
+</details>
 
 Procédure détaillée : **[docs/02-deploiement.md](docs/02-deploiement.md)**.
 
@@ -68,6 +89,7 @@ Procédure détaillée : **[docs/02-deploiement.md](docs/02-deploiement.md)**.
 | Jamais d'ouverture accidentelle | Calendrier absent / périmé / illisible → **repli sur 21h00** | `-Phase calendar` |
 | Non contournable par l'enfant | Héritage des droits coupé, groupe Utilisateurs en lecture seule, tâche sous SYSTEM | `-Phase security` |
 | Pas de partage de connexion | Filtre SSID `netsh wlan` + désactivation de toute carte réseau non recensée | `Get-DodoStatus.ps1` |
+| Installation sans jargon | Assistant graphique auto-élevé, embarqué dans un seul `.exe` | double-clic |
 
 Le noyau de décision est **entièrement séparé** des effets de bord : `DodoCore.ps1`
 n'éteint rien, n'écrit rien, ne va pas sur le réseau. C'est ce qui permet de rejouer

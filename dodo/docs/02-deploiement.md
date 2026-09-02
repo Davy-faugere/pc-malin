@@ -23,7 +23,37 @@ Remove-LocalGroupMember -SID 'S-1-5-32-544' -Member 'Malo'
 
 ---
 
-## 1. Récupérer les fichiers sur le PC d'essai
+## 1. La voie simple : `Dodo-Installateur.exe`
+
+Copiez `Dodo-Installateur.exe` sur le PC (depuis la clé vers le disque), puis
+**double-cliquez**. Windows demande l'autorisation administrateur — c'est normal,
+l'installation touche aux tâches planifiées et aux droits sur les fichiers.
+
+L'assistant s'ouvre et affiche quatre sections :
+
+| Section | Ce que vous y faites |
+|---|---|
+| **1. Compte de l'enfant** | Choisissez-le dans la liste. S'il est administrateur, l'assistant l'affiche en rouge et propose de l'en retirer d'un clic. |
+| **2. Comptes adultes exemptés** | Cochez les vôtres : le poste ne s'éteindra pas pendant qu'ils travaillent. |
+| **3. Bloquer le partage de connexion** | Coché par défaut. Choisissez le Wi-Fi de la maison (détecté automatiquement). Débranchez le téléphone avant de valider. |
+| **4. Mode** | *Tester d'abord* (par défaut, rien ne s'éteint) ou *Mise en service*. |
+
+Puis **Installer**. Le journal défile dans la fenêtre. Ensuite, trois boutons :
+**Voir l'état**, **Tester une soirée** (rejoue les quatre rappels en une minute),
+**Désinstaller**.
+
+C'est tout. Les sections suivantes ne concernent que le déploiement en ligne de
+commande, utile pour enchaîner plusieurs postes.
+
+> **SmartScreen** : l'exe n'est pas signé par un certificat commercial. Au premier
+> lancement, Windows peut afficher « Windows a protégé votre PC » →
+> *Informations complémentaires* → *Exécuter quand même*. Le fichier
+> `Dodo-Installateur.cmd` contient exactement le même code, lisible dans le
+> Bloc-notes avant lancement, si vous préférez vérifier.
+
+---
+
+## 1 bis. Récupérer les sources (déploiement en série)
 
 Copiez le dossier `dodo\` (sous-dossiers `src\` et `tests\`) sur le PC d'essai,
 par exemple dans `C:\Temp\dodo`.
