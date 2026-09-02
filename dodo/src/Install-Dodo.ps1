@@ -49,6 +49,10 @@ $ErrorActionPreference = 'Stop'
 # Aucun tableau ni aucune valeur a espaces ne passe donc plus par la ligne
 # de commande : l'appelant depose un JSON, on le relit ici.
 # --------------------------------------------------------------------------
+$ScheduleFromAnswer = $null
+$HolidaysFromAnswer = $null
+$OfflineFromAnswer  = $null
+
 if ($AnswerFile) {
     if (-not (Test-Path -LiteralPath $AnswerFile)) { throw "Fiche de reponses introuvable : $AnswerFile" }
     $ans = ([System.IO.File]::ReadAllText($AnswerFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json)
@@ -75,6 +79,11 @@ if ($AnswerFile) {
         $AllowedAdapterName = [string[]]@($ans.AllowedAdapterName)
         $PSBoundParameters['AllowedAdapterName'] = $AllowedAdapterName
     }
+
+    # Horaires et periodes de vacances saisis dans l'assistant.
+    if ($ans.PSObject.Properties['Schedule']    -and $ans.Schedule)    { $ScheduleFromAnswer = $ans.Schedule }
+    if ($ans.PSObject.Properties['Holidays'])                          { $HolidaysFromAnswer = @($ans.Holidays) }
+    if ($ans.PSObject.Properties['OfflineOnly'])                       { $OfflineFromAnswer  = [bool]$ans.OfflineOnly }
 }
 
 # Garde-fou : un chemin relatif ou porteur de quotes est le symptome d'un
@@ -198,6 +207,41 @@ if ($EnableAdapterGuard) {
         Warn 'Aucune carte retenue : le garde-cartes desactiverait TOUT le reseau. Il reste actif mais sans effet tant que la liste est vide.'
     }
     else { Ok "$($ids.Count) carte(s) reseau sur liste blanche" }
+}
+
+# --- Horaires saisis a la main
+if ($null -ne $ScheduleFromAnswer) {
+    $sc = Get-DodoProp $existing 'schedule'
+    if ($null -eq $sc) { $sc = [pscustomobject]@{}; Set-Prop $existing 'schedule' $sc }
+    foreach ($k in @('school', 'holiday')) {
+        $src = Get-DodoProp $ScheduleFromAnswer $k
+        if ($null -eq $src) { continue }
+        $dst = Get-DodoProp $sc $k
+        if ($null -eq $dst) { $dst = [pscustomobject]@{}; Set-Prop $sc $k $dst }
+        foreach ($ff in @('start', 'end')) {
+            $vv = Get-DodoProp $src $ff
+            if ($vv) { Set-Prop $dst $ff ([string]$vv) }
+        }
+    }
+    Ok ("Horaires appliques : scolaire {0}->{1}, vacances {2}->{3}" -f $sc.school.start, $sc.school.end, $sc.holiday.start, $sc.holiday.end)
+}
+
+# --- Periodes de vacances saisies a la main
+if ($null -ne $HolidaysFromAnswer -or $null -ne $OfflineFromAnswer) {
+    $calNode = Get-DodoProp $existing 'calendar'
+    if ($null -eq $calNode) { $calNode = [pscustomobject]@{}; Set-Prop $existing 'calendar' $calNode }
+    if ($null -ne $HolidaysFromAnswer) {
+        Set-Prop $calNode 'overrides' @($HolidaysFromAnswer)
+        Ok ("{0} periode(s) de vacances saisie(s) a la main" -f @($HolidaysFromAnswer).Count)
+        foreach ($h in @($HolidaysFromAnswer)) {
+            Info ("  {0} : du {1} au {2} inclus" -f (Get-DodoProp $h 'label' '?'), (Get-DodoProp $h 'start' '?'),
+                  ([datetime]::ParseExact([string](Get-DodoProp $h 'endExclusive'), 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture).AddDays(-1).ToString('yyyy-MM-dd')))
+        }
+    }
+    if ($null -ne $OfflineFromAnswer) {
+        Set-Prop $calNode 'offlineOnly' $OfflineFromAnswer
+        if ($OfflineFromAnswer) { Ok 'Mode hors ligne : aucune connexion au calendrier officiel, les periodes saisies font foi' }
+    }
 }
 
 # Validation AVANT ecriture : une configuration invalide n'est jamais deployee.

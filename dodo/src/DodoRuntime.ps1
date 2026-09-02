@@ -344,6 +344,11 @@ function Get-DodoCalendar {
     $maxEnd   = $null
     if ($periods.Count -gt 0) { $maxEnd = (@($periods | Sort-Object EndExclusive)[-1]).EndExclusive }
 
+    # Une periode saisie a la main par le parent fait autorite : elle vaut
+    # meme sans reseau, meme avec un cache perime. C'est le mode de secours
+    # quand l'API est injoignable (reseau d'entreprise, proxy, portail captif).
+    $ovrFutur = @($periods | Where-Object { $_.Origin -eq 'override' -and $_.EndExclusive -gt $Now.Date }).Count -gt 0
+
     if ($offline) {
         $trusted = ($ovrCount -gt 0)
         if (-not $trusted) { $notes.Add('mode hors ligne mais aucune periode dans calendar.overrides') }
@@ -357,6 +362,11 @@ function Get-DodoCalendar {
         $notes.Add("le cache ne couvre plus l'avenir (derniere periode : $($maxEnd.ToString('yyyy-MM-dd')))")
     }
     else { $trusted = $true }
+
+    if (-not $trusted -and $ovrFutur) {
+        $trusted = $true
+        $notes.Add('calendrier officiel indisponible : les periodes saisies a la main font foi')
+    }
 
     return [pscustomobject]@{
         Trusted     = $trusted

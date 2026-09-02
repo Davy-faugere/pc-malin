@@ -130,14 +130,220 @@ function Test-HasWifi {
     catch { return $false }
 }
 
+function Get-DodoHorairesInitiales {
+    <# Horaires et periodes de depart : configuration deja installee, sinon modele livre. #>
+    $src = $null
+    foreach ($c in @((Join-Path $ROOT 'etc\dodo.config.json'), (Join-Path $SRC 'dodo.config.json'))) {
+        if (Test-Path -LiteralPath $c) {
+            try { $src = ([System.IO.File]::ReadAllText($c, [System.Text.Encoding]::UTF8) | ConvertFrom-Json); break } catch { }
+        }
+    }
+    $h = [pscustomobject]@{
+        SchoolStart = '21:00'; SchoolEnd  = '06:30'
+        HolidayStart = '23:00'; HolidayEnd = '06:30'
+        OfflineOnly = $false
+        Periodes    = (New-Object System.Collections.Generic.List[object])
+    }
+    if ($null -ne $src) {
+        try { if ($src.schedule.school.start)  { $h.SchoolStart  = [string]$src.schedule.school.start }  } catch { }
+        try { if ($src.schedule.school.end)    { $h.SchoolEnd    = [string]$src.schedule.school.end }    } catch { }
+        try { if ($src.schedule.holiday.start) { $h.HolidayStart = [string]$src.schedule.holiday.start } } catch { }
+        try { if ($src.schedule.holiday.end)   { $h.HolidayEnd   = [string]$src.schedule.holiday.end }   } catch { }
+        try { $h.OfflineOnly = [bool]$src.calendar.offlineOnly } catch { }
+        try {
+            foreach ($o in @($src.calendar.overrides)) {
+                if (-not $o.start -or -not $o.endExclusive) { continue }
+                $h.Periodes.Add([pscustomobject]@{
+                    Label = [string]$o.label
+                    Debut = [datetime]::ParseExact([string]$o.start, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+                    Fin   = [datetime]::ParseExact([string]$o.endExclusive, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture).AddDays(-1)
+                })
+            }
+        }
+        catch { }
+    }
+    return $h
+}
+$script:Horaires = Get-DodoHorairesInitiales
+
 $accounts = Get-LocalAccounts
 $admins   = Get-Admins
 $hasWifi  = Test-HasWifi
 
+function Show-DodoHorairesDialog {
+    <# Saisie manuelle des horaires et des periodes de vacances. Renvoie $true si valide. #>
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $d = New-Object System.Windows.Forms.Form
+    $d.Text = 'Horaires et vacances'
+    $d.ClientSize = New-Object System.Drawing.Size(660, 540)
+    $d.StartPosition = 'CenterParent'
+    $d.FormBorderStyle = 'FixedDialog'
+    $d.MaximizeBox = $false; $d.MinimizeBox = $false
+    $d.BackColor = $C_BG
+    $d.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+
+    $gh = New-Object System.Windows.Forms.GroupBox
+    $gh.Text = 'Heures d''extinction et de reveil'
+    $gh.SetBounds(16, 12, 628, 104); $gh.BackColor = $C_PANEL
+    $gh.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $d.Controls.Add($gh)
+
+    function Champ($parent, $x, $y, $val) {
+        $t = New-Object System.Windows.Forms.TextBox
+        $t.SetBounds($x, $y, 62, 24); $t.Text = $val
+        $t.TextAlign = 'Center'
+        $t.Font = New-Object System.Drawing.Font('Consolas', 11)
+        $parent.Controls.Add($t); return $t
+    }
+    function Etiq($parent, $txt, $x, $y, $w) {
+        $l = New-Object System.Windows.Forms.Label
+        $l.Text = $txt; $l.SetBounds($x, $y, $w, 20)
+        $l.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+        $parent.Controls.Add($l); return $l
+    }
+
+    Etiq $gh 'Période scolaire' 16 30 130       | Out-Null
+    Etiq $gh 'extinction à'     150 32 76       | Out-Null
+    $tSS = Champ $gh 228 28 $script:Horaires.SchoolStart
+    Etiq $gh 'réveil à'         310 32 56       | Out-Null
+    $tSE = Champ $gh 372 28 $script:Horaires.SchoolEnd
+
+    Etiq $gh 'Vacances scolaires' 16 66 130     | Out-Null
+    Etiq $gh 'extinction à'     150 68 76       | Out-Null
+    $tHS = Champ $gh 228 64 $script:Horaires.HolidayStart
+    Etiq $gh 'réveil à'         310 68 56       | Out-Null
+    $tHE = Champ $gh 372 64 $script:Horaires.HolidayEnd
+    Etiq $gh 'Format 24 h, par exemple 21:00' 460 46 160 | Out-Null
+
+    $gp = New-Object System.Windows.Forms.GroupBox
+    $gp.Text = 'Périodes de vacances scolaires'
+    $gp.SetBounds(16, 124, 628, 340); $gp.BackColor = $C_PANEL
+    $gp.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $d.Controls.Add($gp)
+
+    $lst = New-Object System.Windows.Forms.ListBox
+    $lst.SetBounds(16, 26, 596, 170)
+    $lst.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+    $gp.Controls.Add($lst)
+
+    $travail = New-Object System.Collections.Generic.List[object]
+    foreach ($x in $script:Horaires.Periodes) { $travail.Add($x) }
+
+    function Rafraichir {
+        $lst.Items.Clear()
+        foreach ($x in ($travail | Sort-Object Debut)) {
+            [void]$lst.Items.Add(('{0,-34} du {1} au {2} inclus' -f $x.Label, $x.Debut.ToString('dd/MM/yyyy'), $x.Fin.ToString('dd/MM/yyyy')))
+        }
+    }
+    Rafraichir
+
+    Etiq $gp 'Nom' 16 210 40 | Out-Null
+    $tLab = New-Object System.Windows.Forms.TextBox
+    $tLab.SetBounds(56, 206, 200, 24); $tLab.Text = 'Vacances'
+    $gp.Controls.Add($tLab)
+    Etiq $gp 'du' 268 210 24 | Out-Null
+    $dpD = New-Object System.Windows.Forms.DateTimePicker
+    $dpD.SetBounds(294, 206, 130, 24); $dpD.Format = 'Short'
+    $gp.Controls.Add($dpD)
+    Etiq $gp 'au' 434 210 24 | Out-Null
+    $dpF = New-Object System.Windows.Forms.DateTimePicker
+    $dpF.SetBounds(458, 206, 130, 24); $dpF.Format = 'Short'
+    $gp.Controls.Add($dpF)
+    Etiq $gp 'Dates incluses : le dernier jour saisi est le dernier soir « vacances ». La rentrée est le lendemain.' 16 236 596 | Out-Null
+
+    $bAdd = New-Object System.Windows.Forms.Button
+    $bAdd.Text = 'Ajouter'; $bAdd.SetBounds(16, 262, 110, 30)
+    $bAdd.BackColor = $C_ACCENT; $bAdd.ForeColor = [System.Drawing.Color]::White
+    $bAdd.FlatStyle = 'Flat'; $bAdd.FlatAppearance.BorderSize = 0
+    $gp.Controls.Add($bAdd)
+    $bDel = New-Object System.Windows.Forms.Button
+    $bDel.Text = 'Supprimer la ligne'; $bDel.SetBounds(136, 262, 150, 30)
+    $gp.Controls.Add($bDel)
+
+    $chkOff = New-Object System.Windows.Forms.CheckBox
+    $chkOff.Text = 'Ne pas utiliser Internet — seules les périodes ci-dessus font foi'
+    $chkOff.SetBounds(16, 300, 460, 24)
+    $chkOff.Checked = [bool]$script:Horaires.OfflineOnly
+    $gp.Controls.Add($chkOff)
+
+    $bAdd.Add_Click({
+        if ($dpF.Value.Date -lt $dpD.Value.Date) {
+            [System.Windows.Forms.MessageBox]::Show('La date de fin précède la date de début.', 'Dodo', 'OK', 'Warning') | Out-Null
+            return
+        }
+        $lab = $tLab.Text.Trim()
+        if (-not $lab) { $lab = 'Vacances' }
+        $travail.Add([pscustomobject]@{ Label = $lab; Debut = $dpD.Value.Date; Fin = $dpF.Value.Date })
+        Rafraichir
+    })
+    $bDel.Add_Click({
+        if ($lst.SelectedIndex -lt 0) { return }
+        $tries = @($travail | Sort-Object Debut)
+        $cible = $tries[$lst.SelectedIndex]
+        [void]$travail.Remove($cible)
+        Rafraichir
+    })
+
+    $bOk = New-Object System.Windows.Forms.Button
+    $bOk.Text = 'Valider'; $bOk.SetBounds(400, 480, 120, 34)
+    $bOk.BackColor = $C_ACCENT; $bOk.ForeColor = [System.Drawing.Color]::White
+    $bOk.FlatStyle = 'Flat'; $bOk.FlatAppearance.BorderSize = 0
+    $bOk.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+    $d.Controls.Add($bOk)
+    $bCan = New-Object System.Windows.Forms.Button
+    $bCan.Text = 'Annuler'; $bCan.SetBounds(530, 480, 114, 34)
+    $bCan.DialogResult = 'Cancel'
+    $d.Controls.Add($bCan)
+    $d.CancelButton = $bCan
+
+    $script:HorairesValides = $false
+    $bOk.Add_Click({
+        $motif = '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+        foreach ($c in @($tSS, $tSE, $tHS, $tHE)) {
+            if ($c.Text.Trim() -notmatch $motif) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Heure invalide : « $($c.Text) »`n`nFormat attendu : HH:mm sur 24 heures, par exemple 21:00 ou 06:30.",
+                    'Dodo', 'OK', 'Warning') | Out-Null
+                $c.Focus(); return
+            }
+        }
+        # La fenetre doit passer minuit : l'extinction est posterieure au reveil.
+        foreach ($paire in @(@($tSS, $tSE, 'scolaire'), @($tHS, $tHE, 'vacances'))) {
+            if ([TimeSpan]::Parse($paire[0].Text.Trim()) -le [TimeSpan]::Parse($paire[1].Text.Trim())) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    ("Règle {0} : l'heure d'extinction ({1}) doit être postérieure à l'heure de réveil ({2}).`n`n" +
+                     "La fenêtre passe minuit : par exemple 21:00 le soir, 06:30 le lendemain.") -f $paire[2], $paire[0].Text, $paire[1].Text,
+                    'Dodo', 'OK', 'Warning') | Out-Null
+                return
+            }
+        }
+        if ($chkOff.Checked -and $travail.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Sans Internet et sans aucune période saisie, la règle scolaire s'appliquerait toute l'année.`n`n" +
+                "Ajoutez au moins une période, ou décochez « Ne pas utiliser Internet ».", 'Dodo', 'OK', 'Warning') | Out-Null
+            return
+        }
+        $script:Horaires.SchoolStart  = $tSS.Text.Trim()
+        $script:Horaires.SchoolEnd    = $tSE.Text.Trim()
+        $script:Horaires.HolidayStart = $tHS.Text.Trim()
+        $script:Horaires.HolidayEnd   = $tHE.Text.Trim()
+        $script:Horaires.OfflineOnly  = [bool]$chkOff.Checked
+        $script:Horaires.Periodes     = (New-Object System.Collections.Generic.List[object])
+        foreach ($x in ($travail | Sort-Object Debut)) { $script:Horaires.Periodes.Add($x) }
+        $script:HorairesValides = $true
+        $d.Close()
+    })
+
+    [void]$d.ShowDialog()
+    return $script:HorairesValides
+}
+
 # ================================================================= interface
 $f = New-Object System.Windows.Forms.Form
 $f.Text = 'Dodo - assistant d''installation'
-$f.ClientSize = New-Object System.Drawing.Size(780, 720)
+$f.ClientSize = New-Object System.Drawing.Size(780, 772)
 $f.StartPosition = 'CenterScreen'
 $f.FormBorderStyle = 'FixedDialog'
 $f.MaximizeBox = $false
@@ -231,7 +437,7 @@ function Fill-Adapters {
 Fill-Adapters
 
 # --- 4. mode
-$g4 = New-Group '4.  Mode' 452 76
+$g4 = New-Group '4.  Horaires et mode' 452 116
 $rbSim = New-Object System.Windows.Forms.RadioButton
 $rbSim.Text = 'Tester d''abord  —  simulation : tout est journalisé, rien ne s''éteint  (recommandé)'
 $rbSim.SetBounds(16, 22, 600, 22); $rbSim.Checked = $true; $g4.Controls.Add($rbSim)
@@ -239,9 +445,16 @@ $rbProd = New-Object System.Windows.Forms.RadioButton
 $rbProd.Text = 'Mise en service  —  le poste s''éteindra réellement aux horaires ci-dessus'
 $rbProd.SetBounds(16, 46, 600, 22); $g4.Controls.Add($rbProd)
 
+$lblHoraires = New-Lbl '' 16 74 520 $g4
+$lblHoraires.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+$lblHoraires.ForeColor = $C_ACCENT
+$btnHoraires = New-Object System.Windows.Forms.Button
+$btnHoraires.Text = 'Horaires et vacances...'; $btnHoraires.SetBounds(545, 74, 180, 30)
+$g4.Controls.Add($btnHoraires)
+
 # --- boutons
 $btnGo = New-Object System.Windows.Forms.Button
-$btnGo.Text = 'Installer'; $btnGo.SetBounds(20, 540, 150, 34)
+$btnGo.Text = 'Installer'; $btnGo.SetBounds(20, 592, 150, 34)
 $btnGo.BackColor = $C_ACCENT; $btnGo.ForeColor = [System.Drawing.Color]::White
 $btnGo.FlatStyle = 'Flat'; $btnGo.FlatAppearance.BorderSize = 0
 $btnGo.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
@@ -249,7 +462,7 @@ $f.Controls.Add($btnGo)
 
 function New-Btn([string]$t, [int]$x, [int]$w) {
     $b = New-Object System.Windows.Forms.Button
-    $b.Text = $t; $b.SetBounds($x, 540, $w, 34); $f.Controls.Add($b); return $b
+    $b.Text = $t; $b.SetBounds($x, 592, $w, 34); $f.Controls.Add($b); return $b
 }
 $btnState  = New-Btn 'Voir l''état'        180 120
 $btnEve    = New-Btn 'Tester une soirée'   310 150
@@ -257,7 +470,7 @@ $btnUnins  = New-Btn 'Désinstaller'        470 120
 $btnClose  = New-Btn 'Fermer'              660 100
 
 $log = New-Object System.Windows.Forms.RichTextBox
-$log.SetBounds(20, 584, 740, 118); $log.ReadOnly = $true
+$log.SetBounds(20, 636, 740, 118); $log.ReadOnly = $true
 $log.Font = New-Object System.Drawing.Font('Consolas', 8.5)
 $log.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 251)
 $f.Controls.Add($log)
@@ -294,6 +507,24 @@ function Refresh-Child {
     }
 }
 $cbChild.Add_SelectedIndexChanged({ Refresh-Child })
+
+function Update-HorairesLabel {
+    $lblHoraires.Text = ('Scolaire {0} - {1}   ·   Vacances {2} - {3}   ·   {4} période(s) saisie(s){5}' -f
+        $script:Horaires.SchoolStart, $script:Horaires.SchoolEnd,
+        $script:Horaires.HolidayStart, $script:Horaires.HolidayEnd,
+        $script:Horaires.Periodes.Count,
+        $(if ($script:Horaires.OfflineOnly) { '   ·   sans Internet' } else { '' }))
+}
+$btnHoraires.Add_Click({
+    if (Show-DodoHorairesDialog) {
+        Update-HorairesLabel
+        Log ('OK   Horaires : scolaire {0}-{1}, vacances {2}-{3} ; {4} période(s) de vacances{5}.' -f
+            $script:Horaires.SchoolStart, $script:Horaires.SchoolEnd,
+            $script:Horaires.HolidayStart, $script:Horaires.HolidayEnd,
+            $script:Horaires.Periodes.Count,
+            $(if ($script:Horaires.OfflineOnly) { ', sans Internet' } else { '' }))
+    }
+})
 
 $btnDemote.Add_Click({
     $n = [string]$cbChild.SelectedItem
@@ -390,6 +621,8 @@ $btnGo.Add_Click({
     $recap = "Compte de l'enfant : $child`n"
     $ex = @($clAdults.CheckedItems | ForEach-Object { [string]$_ })
     $recap += "Adultes exemptés   : " + $(if ($ex.Count) { $ex -join ', ' } else { 'aucun' }) + "`n"
+    $recap += ("Scolaire           : extinction {0}, réveil {1}`n" -f $script:Horaires.SchoolStart, $script:Horaires.SchoolEnd)
+    $recap += ("Vacances           : extinction {0}, réveil {1}  ({2} période(s) saisie(s))`n" -f $script:Horaires.HolidayStart, $script:Horaires.HolidayEnd, $script:Horaires.Periodes.Count)
     $recap += "Mode               : " + $(if ($rbProd.Checked) { 'MISE EN SERVICE - extinction réelle' } else { 'simulation - rien ne s''éteint' }) + "`n`n"
     if ($chkNet.Checked) {
         if ($hasWifi) { $recap += "Seul Wi-Fi autorisé : $ssid`n" }
@@ -416,6 +649,17 @@ $btnGo.Add_Click({
         EnableAdapterGuard = [bool]$chkNet.Checked
         AllowedSsid        = @()
         AllowedAdapterName = @()
+        OfflineOnly        = [bool]$script:Horaires.OfflineOnly
+        Schedule           = [pscustomobject]@{
+            school  = [pscustomobject]@{ start = $script:Horaires.SchoolStart;  end = $script:Horaires.SchoolEnd }
+            holiday = [pscustomobject]@{ start = $script:Horaires.HolidayStart; end = $script:Horaires.HolidayEnd }
+        }
+        Holidays           = @($script:Horaires.Periodes | ForEach-Object {
+            [pscustomobject]@{
+                label        = $_.Label
+                start        = $_.Debut.ToString('yyyy-MM-dd')
+                endExclusive = $_.Fin.AddDays(1).ToString('yyyy-MM-dd')
+            } })
     }
     if ($chkNet.Checked) {
         if ($hasWifi -and $ssid) { $ans.AllowedSsid = @($ssid) }
@@ -473,6 +717,7 @@ for ($i = 0; $i -lt $clAdults.Items.Count; $i++) {
     if ($admins -contains [string]$clAdults.Items[$i]) { $clAdults.SetItemChecked($i, $true) }
 }
 Refresh-Child
+Update-HorairesLabel
 Log "Poste $env:COMPUTERNAME  -  $((Get-CimInstance Win32_OperatingSystem).Caption)"
 Log "OK   Session administrateur : $($ident.Name)"
 Log "     $($accounts.Count) compte(s) local(aux), $($admins.Count) administrateur(s), Wi-Fi : $(if($hasWifi){'présent'}else{'absent (poste fixe)'})"

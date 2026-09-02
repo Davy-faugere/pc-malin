@@ -1,32 +1,72 @@
 {
   "_lisezmoi": "Configuration du couvre-feu Dodo. Voir dodo/docs/03-exploitation.md. Toute modification prend effet a la minute suivante, sans redemarrage.",
-
   "enabled": true,
   "dryRun": true,
-
   "zone": "Zone C",
   "schedule": {
-    "school":  { "start": "21:00", "end": "06:30" },
-    "holiday": { "start": "23:00", "end": "06:30" }
+    "school": {
+      "start": "21:00",
+      "end": "06:30"
+    },
+    "holiday": {
+      "start": "23:00",
+      "end": "06:30"
+    }
   },
-
-  "warningMinutes": [10, 5, 2, 1],
+  "warningMinutes": [
+    10,
+    5,
+    2,
+    1
+  ],
   "shutdownGraceSeconds": 30,
   "bootGraceSeconds": 90,
-
   "strictNightBeforeReturn": true,
   "lateEveningsDuringTerm": [],
   "exemptUsers": [],
-
   "calendar": {
     "apiUrl": "https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-calendrier-scolaire/records",
     "maxCacheAgeDays": 21,
-    "excludePopulations": ["Enseignants"],
+    "excludePopulations": [
+      "Enseignants"
+    ],
     "openEndedSummerEnd": "09-01",
     "offlineOnly": false,
-    "overrides": []
+    "overrides": [
+      {
+        "label": "Vacances de la Toussaint",
+        "start": "2026-10-17",
+        "endExclusive": "2026-11-02"
+      },
+      {
+        "label": "Vacances de Noël",
+        "start": "2026-12-19",
+        "endExclusive": "2027-01-04"
+      },
+      {
+        "label": "Vacances d'Hiver",
+        "start": "2027-02-06",
+        "endExclusive": "2027-02-22"
+      },
+      {
+        "label": "Vacances de Printemps",
+        "start": "2027-04-03",
+        "endExclusive": "2027-04-19"
+      },
+      {
+        "label": "Vacances d'Été (fin déduite au 01/09)",
+        "start": "2027-07-03",
+        "endExclusive": "2027-09-01"
+      }
+    ],
+    "_commentaire_overrides": "Periodes de vacances saisies a la main. Elles font autorite meme sans Internet. Relevees le 02/09/2026 sur data.education.gouv.fr (zone C). 'endExclusive' est le JOUR DE LA RENTREE, donc le lendemain du dernier jour de vacances. Le Pont de l'Ascension 2027 n'y figure pas : sa duree n'est pas publiee dans la source."
   },
-
-  "adapterGuard": { "enabled": false, "allowedPnpDeviceIds": [] },
-  "wifi": { "enforceSsidFilter": false, "allowedSsids": [] }
+  "adapterGuard": {
+    "enabled": false,
+    "allowedPnpDeviceIds": []
+  },
+  "wifi": {
+    "enforceSsidFilter": false,
+    "allowedSsids": []
+  }
 }

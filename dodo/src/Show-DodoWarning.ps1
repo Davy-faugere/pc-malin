@@ -13,7 +13,8 @@
     Aucune de ces etapes n'est bloquante : si tout echoue, la fenetre reste.
 
     Diagnostic : -ListVoices affiche les voix reellement disponibles sur ce poste.
-    Essai manuel : -Force -ForceMinutes 5
+    Essai manuel  : -Force -ForceMinutes 5
+    Diagnostic    : -Diagnose   (affiche tout ce que le script voit)
 #>
 [CmdletBinding()]
 param(
@@ -21,7 +22,8 @@ param(
     [int]$DisplaySeconds = 25,
     [switch]$Force,
     [int]$ForceMinutes = 10,
-    [switch]$ListVoices
+    [switch]$ListVoices,
+    [switch]$Diagnose
 )
 
 Set-StrictMode -Version 2.0
@@ -29,6 +31,11 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'DodoCore.ps1')
 . (Join-Path $PSScriptRoot 'DodoRuntime.ps1')
+
+# En tache planifiee, toute erreur est avalee : une tache qui echoue chaque
+# minute est pire que le silence. En lancement MANUEL au contraire, avaler
+# l'erreur donne un "il ne se passe rien" indebogable : on l'affiche.
+$Interactif = ($Force -or $ListVoices -or $Diagnose)
 
 $userDir = Join-Path $env:LOCALAPPDATA 'Dodo'
 function LogU { param([string]$m, [string]$l = 'INFO') Write-DodoLog -Message $m -Level $l -LogDirectory $userDir | Out-Null }
@@ -162,6 +169,43 @@ try {
     }
 
     $paths = Get-DodoPaths -Root $Root
+
+    if ($Diagnose) {
+        function D { param($k, $v, $ok = $null)
+            Write-Host ('  {0,-26}: ' -f $k) -NoNewline
+            $c = if ($null -eq $ok) { 'Gray' } elseif ($ok) { 'Green' } else { 'Red' }
+            Write-Host $v -ForegroundColor $c }
+        Write-Host ''; Write-Host ' Show-DodoWarning - diagnostic' -ForegroundColor White; Write-Host ''
+        D 'PowerShell'      $PSVersionTable.PSVersion
+        D 'Mode de thread'  ([System.Threading.Thread]::CurrentThread.GetApartmentState())  ([System.Threading.Thread]::CurrentThread.GetApartmentState() -eq 'STA')
+        D 'Compte'          $env:USERNAME
+        D 'Racine resolue'  $paths.Root                 (Test-Path -LiteralPath $paths.Root)
+        D 'Configuration'   $paths.Config               (Test-Path -LiteralPath $paths.Config)
+        D 'Messages'        $paths.Messages             (Test-Path -LiteralPath $paths.Messages)
+        D 'Dossier media'   $paths.Media                (Test-Path -LiteralPath $paths.Media)
+        D 'warning.wav'     (Join-Path $paths.Media 'warning.wav')  (Test-Path -LiteralPath (Join-Path $paths.Media 'warning.wav'))
+        D 'Journal utilisateur' $userDir
+        $vv = Get-DodoVoices
+        D 'Voix SAPI5'      ("{0} trouvee(s)" -f $vv.Count) ($vv.Count -gt 0)
+        foreach ($x in $vv) { Write-Host ("      - {0} [{1}]" -f $x.Name, $x.Culture) -ForegroundColor DarkGray }
+        $wf = $true
+        try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; Add-Type -AssemblyName System.Drawing -ErrorAction Stop }
+        catch { $wf = $false }
+        D 'WinForms chargeable' $(if ($wf) { 'oui' } else { 'NON' }) $wf
+        try {
+            $c0 = Get-DodoConfiguration -Root $Root
+            D 'Configuration lue' ("enabled={0} dryRun={1} scolaire={2}->{3}" -f $c0.enabled, $c0.dryRun, $c0.schedule.school.start, $c0.schedule.school.end) $true
+            $cal0 = Get-DodoCalendar -Config $c0 -Root $Root
+            D 'Calendrier' ("fiable={0} api={1} manuelles={2}" -f $cal0.Trusted, $cal0.ApiCount, $cal0.OverrideCount) $cal0.Trusted
+            foreach ($n in $cal0.Notes) { Write-Host "      ! $n" -ForegroundColor Yellow }
+            $st0 = Get-DodoState -Now (Get-DodoNow -Config $c0 -Root $Root) -Config $c0 -Periods $cal0.Periods -CalendarTrusted $cal0.Trusted
+            D 'Etat courant' ("{0} - extinction {1}" -f $st0.State, $st0.BlockStart.ToString('dd/MM HH:mm')) $true
+        }
+        catch { D 'Configuration lue' ("ECHEC : " + $_.Exception.Message) $false }
+        Write-Host ''
+        if (-not $Force) { exit 0 }
+    }
+
     $cfg   = Get-DodoConfiguration -Root $Root
     $msgs  = Get-DodoMessages -Root $Root
     $now   = Get-DodoNow -Config $cfg -Root $Root
@@ -220,5 +264,19 @@ try {
 }
 catch {
     try { LogU "Erreur inattendue : $($_.Exception.Message)" 'ERROR' } catch { }
+    if ($Interactif) {
+        Write-Host ''
+        Write-Host "ECHEC : $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
+        Write-Host ''
+        Write-Host 'Relancez avec -Diagnose pour un etat detaille.' -ForegroundColor Yellow
+        try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+            [System.Windows.Forms.MessageBox]::Show(
+                "Show-DodoWarning a echoue :`n`n$($_.Exception.Message)", 'Dodo', 'OK', 'Error') | Out-Null
+        }
+        catch { }
+        exit 1
+    }
     exit 0   # ne jamais faire echouer la tache planifiee
 }

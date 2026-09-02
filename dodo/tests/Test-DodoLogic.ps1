@@ -302,6 +302,39 @@ Remove-Item -LiteralPath $fiche -Force -ErrorAction SilentlyContinue
 $env:ProgramData = $pdSauve
 
 # --------------------------------------------------------------------------
+Write-Section 'Calendrier saisi a la main (reseau indisponible)'
+. (Join-Path $srcDir 'DodoRuntime.ps1')
+$rootTmp = Join-Path ([System.IO.Path]::GetTempPath()) ('dodo-cal-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+New-Item -ItemType Directory -Path (Join-Path $rootTmp 'var') -Force | Out-Null
+
+# Aucun cache API : seule une periode saisie a la main est disponible. Elle
+# doit faire autorite, sinon le repli scolaire s'appliquerait toute l'annee
+# sur un poste sans acces au calendrier officiel.
+$cfgM = Resolve-DodoConfig ([pscustomobject]@{ calendar = [pscustomobject]@{ overrides = @(
+    [pscustomobject]@{ label = 'Toussaint'; start = '2026-10-17'; endExclusive = '2026-11-02' }) } })
+$calM = Get-DodoCalendar -Config $cfgM -Root $rootTmp -Now ([datetime]'2026-10-20 12:00')
+Assert-Equal $true  $calM.Trusted        'sans cache API, une periode manuelle a venir rend le calendrier fiable'
+Assert-Equal 1      $calM.OverrideCount  'la periode manuelle est bien chargee'
+Assert-Equal 0      $calM.ApiCount       'aucune periode issue de l API'
+Assert-Equal 'Allowed' (Get-DodoState ([datetime]'2026-10-20 22:00') $cfgM $calM.Periods $calM.Trusted).State 'vacances manuelles : 22h00 autorise'
+Assert-Equal 'Blocked' (Get-DodoState ([datetime]'2026-10-20 23:00') $cfgM $calM.Periods $calM.Trusted).State 'vacances manuelles : 23h00 bloque'
+Assert-Equal 'Blocked' (Get-DodoState ([datetime]'2026-11-03 21:30') $cfgM $calM.Periods $calM.Trusted).State 'apres la rentree : retour a 21h00'
+
+# Une periode entierement passee ne prouve rien : on retombe sur le repli strict.
+$cfgP = Resolve-DodoConfig ([pscustomobject]@{ calendar = [pscustomobject]@{ overrides = @(
+    [pscustomobject]@{ label = 'Ancienne'; start = '2020-01-01'; endExclusive = '2020-01-10' }) } })
+$calP = Get-DodoCalendar -Config $cfgP -Root $rootTmp -Now ([datetime]'2026-10-20 12:00')
+Assert-Equal $false $calP.Trusted 'une periode manuelle entierement passee ne rend pas le calendrier fiable'
+
+# Mode hors ligne assume : les periodes manuelles suffisent, sans aucun reseau.
+$cfgO = Resolve-DodoConfig ([pscustomobject]@{ calendar = [pscustomobject]@{ offlineOnly = $true; overrides = @(
+    [pscustomobject]@{ label = 'Noel'; start = '2026-12-19'; endExclusive = '2027-01-04' }) } })
+$calO = Get-DodoCalendar -Config $cfgO -Root $rootTmp -Now ([datetime]'2026-12-20 12:00')
+Assert-Equal $true $calO.Trusted 'mode hors ligne avec periodes saisies : calendrier fiable'
+Assert-Equal 'Allowed' (Get-DodoState ([datetime]'2026-12-20 22:30') $cfgO $calO.Periods $calO.Trusted).State 'hors ligne, vacances de Noel : 22h30 autorise'
+Remove-Item -LiteralPath $rootTmp -Recurse -Force -ErrorAction SilentlyContinue
+
+# --------------------------------------------------------------------------
 Write-Section 'Purete ASCII des sources (accents interdits hors messages JSON)'
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 # Regle : un .ps1 est soit en ASCII pur, soit en UTF-8 AVEC BOM. Sans BOM,
