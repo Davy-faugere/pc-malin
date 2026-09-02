@@ -166,9 +166,331 @@ function Get-DodoHorairesInitiales {
 }
 $script:Horaires = Get-DodoHorairesInitiales
 
+function Get-DodoVoixInitiale {
+    <# Reglages de voix et textes deja en place, sinon les valeurs par defaut. #>
+    $v = [pscustomobject]@{
+        Active     = $true
+        VoiceName  = ''
+        Debit      = 0
+        Volume     = 100
+        Repetition = 20
+        Affichage  = 25
+        Preavis     = "Attention {name}, l'ordinateur va s'éteindre dans {minutes} minutes. Pense à enregistrer ton travail."
+        DerniereMin = "Attention {name}, l'ordinateur va s'éteindre dans une minute. Enregistre tout de suite."
+        Extinction  = "Il est l'heure de dormir. L'ordinateur s'éteint maintenant. Bonne nuit !"
+    }
+    $cfgF = Join-Path $ROOT 'etc\dodo.config.json'
+    if (Test-Path -LiteralPath $cfgF) {
+        try {
+            $c = [System.IO.File]::ReadAllText($cfgF, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($c.PSObject.Properties['speech'] -and $c.speech) {
+                foreach ($paire in @(@('enabled','Active'), @('voiceName','VoiceName'), @('rate','Debit'),
+                                     @('volume','Volume'), @('repeatEverySeconds','Repetition'),
+                                     @('displaySeconds','Affichage'))) {
+                    if ($c.speech.PSObject.Properties[$paire[0]]) { $v.($paire[1]) = $c.speech.($paire[0]) }
+                }
+            }
+        }
+        catch { }
+    }
+    $msgF = Join-Path $ROOT 'etc\dodo.messages.json'
+    if (Test-Path -LiteralPath $msgF) {
+        try {
+            $m = [System.IO.File]::ReadAllText($msgF, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            foreach ($paire in @(@('warning','Preavis'), @('warningOne','DerniereMin'), @('shutdownNow','Extinction'))) {
+                if ($m.PSObject.Properties[$paire[0]] -and $m.($paire[0])) { $v.($paire[1]) = [string]$m.($paire[0]) }
+            }
+        }
+        catch { }
+    }
+    return $v
+}
+$script:Voix = Get-DodoVoixInitiale
+
+function Get-DodoVoixDisponibles {
+    <#
+        Voix reellement presentes sur ce poste, les DEUX jeux. DodoSpeech.ps1
+        est charge dans un processus separe : le charger ici forcerait la
+        projection WinRT dans l'assistant, dont l'interface est deja lancee.
+    #>
+    $script:SpeechModule = Join-Path $SRC 'DodoSpeech.ps1'
+    if (-not (Test-Path -LiteralPath $script:SpeechModule)) { return @() }
+    try {
+        $sortie = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command (
+            ". '$($script:SpeechModule)'; Get-DodoAllVoices | ConvertTo-Json -Compress") 2>&1 | Out-String
+        $sortie = $sortie.Trim()
+        if (-not $sortie) { return @() }
+        return @($sortie | ConvertFrom-Json)
+    }
+    catch { return @() }
+}
+
+
 $accounts = Get-LocalAccounts
 $admins   = Get-Admins
 $hasWifi  = Test-HasWifi
+
+function Show-DodoVoixDialog {
+    <#
+        Saisie du texte prononcé et choix de la voix. Renvoie $true si validé.
+
+        Les voix « modernes » de Windows 11 (OneCore) sont celles qu'on trouve
+        dans Paramètres > Heure et langue > Voix : ce sont les seules qui
+        parlent français. Elles apparaissent ici au même titre que les voix
+        classiques, préfixées par leur moteur.
+    #>
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $d = New-Object System.Windows.Forms.Form
+    $d.Text = 'Message parlé et voix'
+    $d.ClientSize = New-Object System.Drawing.Size(700, 590)
+    $d.StartPosition = 'CenterParent'
+    $d.FormBorderStyle = 'FixedDialog'
+    $d.MaximizeBox = $false; $d.MinimizeBox = $false
+    $d.BackColor = $C_BG
+    $d.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+
+    # ---------------------------------------------------------------- voix
+    $gv = New-Object System.Windows.Forms.GroupBox
+    $gv.Text = 'Voix'
+    $gv.SetBounds(16, 12, 668, 150); $gv.BackColor = $C_PANEL
+    $gv.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $d.Controls.Add($gv)
+
+    $chkVoix = New-Object System.Windows.Forms.CheckBox
+    $chkVoix.Text = 'Annoncer le message à voix haute'
+    $chkVoix.SetBounds(16, 24, 300, 22)
+    $chkVoix.Checked = [bool]$script:Voix.Active
+    $chkVoix.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $gv.Controls.Add($chkVoix)
+
+    $lv = New-Object System.Windows.Forms.Label
+    $lv.Text = 'Voix :'; $lv.SetBounds(16, 56, 44, 20)
+    $lv.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+    $gv.Controls.Add($lv)
+
+    $cbVoix = New-Object System.Windows.Forms.ComboBox
+    $cbVoix.SetBounds(62, 53, 400, 24); $cbVoix.DropDownStyle = 'DropDownList'
+    $cbVoix.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+    $gv.Controls.Add($cbVoix)
+
+    $btnEcoute = New-Object System.Windows.Forms.Button
+    $btnEcoute.Text = 'Écouter'; $btnEcoute.SetBounds(474, 52, 90, 27)
+    $btnEcoute.BackColor = $C_ACCENT; $btnEcoute.ForeColor = [System.Drawing.Color]::White
+    $btnEcoute.FlatStyle = 'Flat'; $btnEcoute.FlatAppearance.BorderSize = 0
+    $gv.Controls.Add($btnEcoute)
+
+    $btnRelire = New-Object System.Windows.Forms.Button
+    $btnRelire.Text = 'Rechercher'; $btnRelire.SetBounds(572, 52, 84, 27)
+    $gv.Controls.Add($btnRelire)
+
+    $lblVoixEtat = New-Object System.Windows.Forms.Label
+    $lblVoixEtat.SetBounds(16, 84, 640, 20)
+    $lblVoixEtat.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $gv.Controls.Add($lblVoixEtat)
+
+    $lblAide = New-Object System.Windows.Forms.Label
+    $lblAide.SetBounds(16, 106, 640, 36)
+    $lblAide.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $lblAide.ForeColor = [System.Drawing.Color]::Gray
+    $gv.Controls.Add($lblAide)
+
+    $script:VoixListe = @()
+    function Remplir-Voix {
+        $cbVoix.Items.Clear()
+        [void]$cbVoix.Items.Add('Choix automatique (voix française si présente)')
+        $script:VoixListe = @(Get-DodoVoixDisponibles)
+        foreach ($v in $script:VoixListe) {
+            [void]$cbVoix.Items.Add(('[{0}] {1}  ({2})' -f $v.Engine, $v.Name, $v.Culture))
+        }
+        $cbVoix.SelectedIndex = 0
+        for ($i = 0; $i -lt $script:VoixListe.Count; $i++) {
+            if ($script:VoixListe[$i].Name -eq $script:Voix.VoiceName) { $cbVoix.SelectedIndex = $i + 1; break }
+        }
+        $fr = @($script:VoixListe | Where-Object { $_.IsFrench }).Count
+        $oc = @($script:VoixListe | Where-Object { $_.Engine -eq 'OneCore' }).Count
+        $lblVoixEtat.Text = ('{0} voix trouvées sur ce PC : {1} modernes (Windows 11), {2} en français.' -f
+                             $script:VoixListe.Count, $oc, $fr)
+        if ($fr -gt 0) {
+            $lblVoixEtat.ForeColor = $C_OK
+            $lblAide.Text = "Le « choix automatique » prend la première voix française. Le bouton Écouter fait dire le texte du préavis ci-dessous."
+        }
+        else {
+            $lblVoixEtat.ForeColor = $C_WARN
+            $lblAide.Text = ("Aucune voix française sur ce PC. Pour en ajouter : Paramètres > Heure et langue > Voix > " +
+                             "Ajouter des voix > Français.`r`nSans cela, le message sera lu avec une voix anglaise.")
+        }
+    }
+    Remplir-Voix
+    $btnRelire.Add_Click({ Remplir-Voix })
+
+    # ------------------------------------------------------------- cadence
+    $gc = New-Object System.Windows.Forms.GroupBox
+    $gc.Text = 'Répétition pendant le décompte'
+    $gc.SetBounds(16, 170, 668, 82); $gc.BackColor = $C_PANEL
+    $gc.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $d.Controls.Add($gc)
+
+    function Nombre($parent, $x, $y, $min, $max, $val) {
+        $n = New-Object System.Windows.Forms.NumericUpDown
+        $n.SetBounds($x, $y, 64, 24); $n.Minimum = $min; $n.Maximum = $max
+        $n.Value = [math]::Max($min, [math]::Min($max, [int]$val))
+        $n.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+        $parent.Controls.Add($n); return $n
+    }
+    function Etiq2($parent, $txt, $x, $y, $w) {
+        $l = New-Object System.Windows.Forms.Label
+        $l.Text = $txt; $l.SetBounds($x, $y, $w, 20)
+        $l.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+        $parent.Controls.Add($l); return $l
+    }
+
+    Etiq2 $gc 'Répéter le message toutes les' 16 28 180 | Out-Null
+    $nRep = Nombre $gc 200 24 0 300 $script:Voix.Repetition
+    Etiq2 $gc 'secondes  (0 = une seule fois)' 270 28 200 | Out-Null
+
+    Etiq2 $gc 'Fenêtre affichée pendant' 16 54 180 | Out-Null
+    $nAff = Nombre $gc 200 50 5 300 $script:Voix.Affichage
+    Etiq2 $gc 'secondes' 270 54 80 | Out-Null
+
+    $lblCadence = New-Object System.Windows.Forms.Label
+    $lblCadence.SetBounds(370, 40, 286, 32)
+    $lblCadence.Font = New-Object System.Drawing.Font('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)
+    $lblCadence.ForeColor = $C_ACCENT
+    $gc.Controls.Add($lblCadence)
+
+    function Maj-Cadence {
+        $n = 1
+        if ([int]$nRep.Value -gt 0) { $n = 1 + [math]::Floor(([int]$nAff.Value - 1) / [int]$nRep.Value) }
+        if ($n -lt 1) { $n = 1 }
+        $lblCadence.Text = ('Le message sera prononcé {0} fois à chaque alerte.' -f $n)
+    }
+    Maj-Cadence
+    $nRep.Add_ValueChanged({ Maj-Cadence })
+    $nAff.Add_ValueChanged({ Maj-Cadence })
+
+    # -------------------------------------------------------------- textes
+    $gt = New-Object System.Windows.Forms.GroupBox
+    $gt.Text = 'Ce que la voix doit dire'
+    $gt.SetBounds(16, 260, 668, 250); $gt.BackColor = $C_PANEL
+    $gt.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $d.Controls.Add($gt)
+
+    function Zone($parent, $titre, $y, $val) {
+        $l = New-Object System.Windows.Forms.Label
+        $l.Text = $titre; $l.SetBounds(16, $y, 640, 18)
+        $l.Font = New-Object System.Drawing.Font('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)
+        $parent.Controls.Add($l)
+        $t = New-Object System.Windows.Forms.TextBox
+        $t.SetBounds(16, ($y + 20), 636, 42); $t.Multiline = $true
+        $t.Text = $val
+        $t.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+        $parent.Controls.Add($t); return $t
+    }
+    $tPre = Zone $gt 'Préavis (10, 5 et 2 minutes avant)' 24  $script:Voix.Preavis
+    $tOne = Zone $gt 'Dernière minute'                    94  $script:Voix.DerniereMin
+    $tFin = Zone $gt 'Au moment de l''extinction'         164 $script:Voix.Extinction
+
+    $lblJetons = New-Object System.Windows.Forms.Label
+    $lblJetons.Text = '{minutes} est remplacé par le nombre de minutes restantes, {name} par le prénom du compte Windows.'
+    $lblJetons.SetBounds(16, 516, 668, 20)
+    $lblJetons.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $lblJetons.ForeColor = [System.Drawing.Color]::Gray
+    $d.Controls.Add($lblJetons)
+
+    # ------------------------------------------------------------- ecouter
+    $btnEcoute.Add_Click({
+        $txt = $tPre.Text.Replace('{minutes}', '10').Replace('{name}', $env:USERNAME)
+        if (-not $txt.Trim()) {
+            [System.Windows.Forms.MessageBox]::Show('Le texte du préavis est vide.', 'Dodo', 'OK', 'Warning') | Out-Null
+            return
+        }
+        if (-not $chkVoix.Checked) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "La voix est désactivée : cochez « Annoncer le message à voix haute » pour l'entendre.",
+                'Dodo', 'OK', 'Information') | Out-Null
+            return
+        }
+        $nom = ''
+        if ($cbVoix.SelectedIndex -gt 0) { $nom = $script:VoixListe[$cbVoix.SelectedIndex - 1].Name }
+        $agent = Join-Path $SRC 'Show-DodoWarning.ps1'
+        if (-not (Test-Path -LiteralPath $agent)) {
+            [System.Windows.Forms.MessageBox]::Show('Show-DodoWarning.ps1 est introuvable.', 'Dodo', 'OK', 'Error') | Out-Null
+            return
+        }
+        # L'essai passe par le moteur reel, avec les memes reglages que ceux
+        # qui seront installes : ce qu'on entend ici est ce qu'on entendra.
+        $sp = @{ enabled = $true; engine = 'auto'; voiceName = $nom
+                 rate = [int]$script:Voix.Debit; volume = [int]$script:Voix.Volume } | ConvertTo-Json -Compress
+        $fichierSp = Join-Path $env:TEMP 'dodo-essai-voix.json'
+        [System.IO.File]::WriteAllText($fichierSp, $sp, (New-Object System.Text.UTF8Encoding($false)))
+        $btnEcoute.Enabled = $false
+        $d.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+        try {
+            $script:EssaiVoix = @'
+param($Agent, $Texte, $Reglages)
+. (Join-Path (Split-Path -Parent $Agent) 'DodoSpeech.ps1')
+$sp = [System.IO.File]::ReadAllText($Reglages, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+$r = Invoke-DodoSpeak -Text $Texte -Speech $sp
+Write-Output $r
+Start-Sleep -Seconds ([math]::Min(30, 2 + [int]($Texte.Length / 12)))
+'@
+            $fichierPs = Join-Path $env:TEMP 'dodo-essai-voix.ps1'
+            [System.IO.File]::WriteAllText($fichierPs, $script:EssaiVoix, (New-Object System.Text.UTF8Encoding($true)))
+            $res = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $fichierPs $agent $txt $fichierSp 2>&1 | Out-String
+            $voie = ($res -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
+            $lblVoixEtat.Text = ('Essai : {0}' -f $voie)
+            $lblVoixEtat.ForeColor = $(if ($voie -like '*aucun*' -or $voie -like '*desactivee*') { $C_ERR } else { $C_OK })
+        }
+        catch {
+            $lblVoixEtat.Text = ('Essai impossible : {0}' -f $_.Exception.Message)
+            $lblVoixEtat.ForeColor = $C_ERR
+        }
+        finally {
+            $d.Cursor = [System.Windows.Forms.Cursors]::Default
+            $btnEcoute.Enabled = $true
+        }
+    })
+
+    # -------------------------------------------------------------- valider
+    $bOk = New-Object System.Windows.Forms.Button
+    $bOk.Text = 'Valider'; $bOk.SetBounds(440, 544, 120, 34)
+    $bOk.BackColor = $C_ACCENT; $bOk.ForeColor = [System.Drawing.Color]::White
+    $bOk.FlatStyle = 'Flat'; $bOk.FlatAppearance.BorderSize = 0
+    $bOk.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+    $d.Controls.Add($bOk)
+    $bCan = New-Object System.Windows.Forms.Button
+    $bCan.Text = 'Annuler'; $bCan.SetBounds(570, 544, 114, 34)
+    $bCan.DialogResult = 'Cancel'
+    $d.Controls.Add($bCan)
+    $d.CancelButton = $bCan
+
+    $script:VoixValide = $false
+    $bOk.Add_Click({
+        foreach ($paire in @(@($tPre, 'préavis'), @($tOne, 'dernière minute'), @($tFin, 'extinction'))) {
+            if (-not $paire[0].Text.Trim()) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    ("Le texte « {0} » est vide.`n`nUn message vide ne serait ni dit ni affiché." -f $paire[1]),
+                    'Dodo', 'OK', 'Warning') | Out-Null
+                $paire[0].Focus(); return
+            }
+        }
+        $script:Voix.Active     = [bool]$chkVoix.Checked
+        $script:Voix.VoiceName  = $(if ($cbVoix.SelectedIndex -gt 0) { $script:VoixListe[$cbVoix.SelectedIndex - 1].Name } else { '' })
+        $script:Voix.Repetition = [int]$nRep.Value
+        $script:Voix.Affichage  = [int]$nAff.Value
+        $script:Voix.Preavis     = $tPre.Text.Trim()
+        $script:Voix.DerniereMin = $tOne.Text.Trim()
+        $script:Voix.Extinction  = $tFin.Text.Trim()
+        $script:VoixValide = $true
+        $d.Close()
+    })
+
+    [void]$d.ShowDialog()
+    $d.Dispose()
+    return $script:VoixValide
+}
 
 function Show-DodoHorairesDialog {
     <# Saisie manuelle des horaires et des periodes de vacances. Renvoie $true si valide. #>
@@ -343,7 +665,7 @@ function Show-DodoHorairesDialog {
 # ================================================================= interface
 $f = New-Object System.Windows.Forms.Form
 $f.Text = 'Dodo - assistant d''installation'
-$f.ClientSize = New-Object System.Drawing.Size(780, 772)
+$f.ClientSize = New-Object System.Drawing.Size(780, 810)
 $f.StartPosition = 'CenterScreen'
 $f.FormBorderStyle = 'FixedDialog'
 $f.MaximizeBox = $false
@@ -437,7 +759,7 @@ function Fill-Adapters {
 Fill-Adapters
 
 # --- 4. mode
-$g4 = New-Group '4.  Horaires et mode' 452 116
+$g4 = New-Group '4.  Horaires, message parlé et mode' 452 152
 $rbSim = New-Object System.Windows.Forms.RadioButton
 $rbSim.Text = 'Tester d''abord  —  simulation : tout est journalisé, rien ne s''éteint  (recommandé)'
 $rbSim.SetBounds(16, 22, 600, 22); $rbSim.Checked = $true; $g4.Controls.Add($rbSim)
@@ -452,9 +774,16 @@ $btnHoraires = New-Object System.Windows.Forms.Button
 $btnHoraires.Text = 'Horaires et vacances...'; $btnHoraires.SetBounds(545, 74, 180, 30)
 $g4.Controls.Add($btnHoraires)
 
+$lblVoix = New-Lbl '' 16 110 520 $g4
+$lblVoix.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+$lblVoix.ForeColor = $C_ACCENT
+$btnVoix = New-Object System.Windows.Forms.Button
+$btnVoix.Text = 'Message parlé et voix...'; $btnVoix.SetBounds(545, 110, 180, 30)
+$g4.Controls.Add($btnVoix)
+
 # --- boutons
 $btnGo = New-Object System.Windows.Forms.Button
-$btnGo.Text = 'Installer'; $btnGo.SetBounds(20, 592, 150, 34)
+$btnGo.Text = 'Installer'; $btnGo.SetBounds(20, 628, 150, 34)
 $btnGo.BackColor = $C_ACCENT; $btnGo.ForeColor = [System.Drawing.Color]::White
 $btnGo.FlatStyle = 'Flat'; $btnGo.FlatAppearance.BorderSize = 0
 $btnGo.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
@@ -462,7 +791,7 @@ $f.Controls.Add($btnGo)
 
 function New-Btn([string]$t, [int]$x, [int]$w) {
     $b = New-Object System.Windows.Forms.Button
-    $b.Text = $t; $b.SetBounds($x, 592, $w, 34); $f.Controls.Add($b); return $b
+    $b.Text = $t; $b.SetBounds($x, 628, $w, 34); $f.Controls.Add($b); return $b
 }
 $btnState  = New-Btn 'Voir l''état'        180 120
 $btnEve    = New-Btn 'Tester une soirée'   310 150
@@ -470,7 +799,7 @@ $btnUnins  = New-Btn 'Désinstaller'        470 120
 $btnClose  = New-Btn 'Fermer'              660 100
 
 $log = New-Object System.Windows.Forms.RichTextBox
-$log.SetBounds(20, 636, 740, 118); $log.ReadOnly = $true
+$log.SetBounds(20, 674, 740, 118); $log.ReadOnly = $true
 $log.Font = New-Object System.Drawing.Font('Consolas', 8.5)
 $log.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 251)
 $f.Controls.Add($log)
@@ -515,6 +844,31 @@ function Update-HorairesLabel {
         $script:Horaires.Periodes.Count,
         $(if ($script:Horaires.OfflineOnly) { '   ·   sans Internet' } else { '' }))
 }
+function Update-VoixLabel {
+    if (-not $script:Voix.Active) {
+        $lblVoix.Text = 'Message parlé : désactivé — seule la fenêtre s''affichera.'
+        return
+    }
+    $n = 1
+    if ([int]$script:Voix.Repetition -gt 0) {
+        $n = 1 + [math]::Floor(([int]$script:Voix.Affichage - 1) / [int]$script:Voix.Repetition)
+    }
+    if ($n -lt 1) { $n = 1 }
+    $lblVoix.Text = ('Voix : {0}   ·   message répété {1} fois par alerte' -f
+        $(if ($script:Voix.VoiceName) { $script:Voix.VoiceName } else { 'choix automatique' }), $n)
+}
+Update-VoixLabel
+
+$btnVoix.Add_Click({
+    if (Show-DodoVoixDialog) {
+        Update-VoixLabel
+        Log ('OK   Message parlé : {0}, répétition toutes les {1} s, fenêtre {2} s.' -f
+            $(if ($script:Voix.Active) { 'activé' } else { 'désactivé' }),
+            $script:Voix.Repetition, $script:Voix.Affichage)
+        Log ('     Préavis : « {0} »' -f $script:Voix.Preavis)
+    }
+})
+
 $btnHoraires.Add_Click({
     if (Show-DodoHorairesDialog) {
         Update-HorairesLabel
@@ -636,6 +990,13 @@ $btnGo.Add_Click({
     }
     else { $recap += "Blocage du partage de connexion : désactivé." }
 
+    $recap += "`n`nMessage parlé   : "
+    if ($script:Voix.Active) {
+        $recap += ("{0}`n" -f $(if ($script:Voix.VoiceName) { $script:Voix.VoiceName } else { 'choix automatique' }))
+        $recap += ("Texte           : « {0} »" -f $script:Voix.Preavis)
+    }
+    else { $recap += "désactivé" }
+
     if ([System.Windows.Forms.MessageBox]::Show($recap + "`n`nInstaller avec ces réglages ?", 'Dodo - vérification',
         'YesNo', 'Question') -ne 'Yes') { return }
 
@@ -653,6 +1014,20 @@ $btnGo.Add_Click({
         Schedule           = [pscustomobject]@{
             school  = [pscustomobject]@{ start = $script:Horaires.SchoolStart;  end = $script:Horaires.SchoolEnd }
             holiday = [pscustomobject]@{ start = $script:Horaires.HolidayStart; end = $script:Horaires.HolidayEnd }
+        }
+        Speech             = [pscustomobject]@{
+            enabled            = [bool]$script:Voix.Active
+            engine             = 'auto'
+            voiceName          = [string]$script:Voix.VoiceName
+            rate               = [int]$script:Voix.Debit
+            volume             = [int]$script:Voix.Volume
+            repeatEverySeconds = [int]$script:Voix.Repetition
+            displaySeconds     = [int]$script:Voix.Affichage
+        }
+        Messages           = [pscustomobject]@{
+            warning     = [string]$script:Voix.Preavis
+            warningOne  = [string]$script:Voix.DerniereMin
+            shutdownNow = [string]$script:Voix.Extinction
         }
         Holidays           = @($script:Horaires.Periodes | ForEach-Object {
             [pscustomobject]@{

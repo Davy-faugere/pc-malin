@@ -93,6 +93,15 @@ $reponses = [pscustomobject]@{
     Holidays           = @(
         [pscustomobject]@{ label = 'Recette Toussaint'; start = '2026-10-17'; endExclusive = '2026-11-02' }
     )
+    Speech             = [pscustomobject]@{
+        enabled = $true; engine = 'auto'; voiceName = ''; rate = -1; volume = 90
+        repeatEverySeconds = 15; displaySeconds = 45
+    }
+    Messages           = [pscustomobject]@{
+        warning     = 'Recette : extinction dans {minutes} minutes.'
+        warningOne  = 'Recette : extinction dans une minute.'
+        shutdownNow = 'Recette : extinction maintenant.'
+    }
 }
 [System.IO.File]::WriteAllText($fiche, ($reponses | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
 
@@ -123,7 +132,18 @@ try {
         Chk ($cfg.schedule.holiday.start -eq '23:00')   'horaire vacances transmis'
         Chk (@($cfg.exemptUsers) -contains $env:USERNAME) 'compte exempte transmis'
         Chk (@($cfg.calendar.overrides).Count -eq 1)    'periode de vacances manuelle transmise'
+        Chk ($cfg.speech.enabled -eq $true)             'reglages de voix transmis par la fiche de reponses'
+        Chk ($cfg.speech.repeatEverySeconds -eq 15)     'cadence de repetition transmise'
+        Chk ($cfg.speech.displaySeconds -eq 45)         'duree d affichage transmise'
+        Chk ($cfg.speech.volume -eq 90)                 'volume transmis'
     }
+    Chk (Test-Path -LiteralPath (Join-Path $paths.Bin 'DodoSpeech.ps1')) 'DodoSpeech.ps1 deploye dans bin'
+    $msgDeploye = $null
+    try { $msgDeploye = Get-DodoMessages -Root $Root } catch { }
+    Chk ($null -ne $msgDeploye -and $msgDeploye.warning -eq 'Recette : extinction dans {minutes} minutes.') `
+        'le texte ecrit par le parent remplace le texte par defaut'
+    Chk ($null -ne $msgDeploye -and $msgDeploye.shutdownNow -eq 'Recette : extinction maintenant.') `
+        'le texte d extinction est celui du parent'
 
     # ======================================================================
     Sec 'PHASE 4 - Droits NTFS'
@@ -182,6 +202,86 @@ try {
 
     $rS = Invoke-Ps -Script (Join-Path $paths.Bin 'Get-DodoStatus.ps1') -Arguments @('-Nights', '3')
     Chk ($rS.Code -eq 0) "Get-DodoStatus.ps1 se termine en code 0 (obtenu $($rS.Code))"
+
+    # ======================================================================
+    Sec 'PHASE 6bis - Moteur vocal (voix modernes de Windows)'
+    # C'est la couche que rien d'autre ne peut prouver : la projection WinRT
+    # n'existe pas sous Linux, et les voix francaises de Windows 11 sont
+    # invisibles pour System.Speech. On verifie ici le CONTRAT (aucune
+    # exception, repli correct) puis, si la machine a bien des voix modernes,
+    # la synthese reelle.
+    . (Join-Path $paths.Bin 'DodoSpeech.ps1')
+
+    $vSapi = @(Get-DodoSapiVoices)
+    $vOne  = @(Get-DodoOneCoreVoices)
+    $vTout = @(Get-DodoAllVoices)
+    Note ("SAPI5   : {0} voix" -f $vSapi.Count)
+    Note ("OneCore : {0} voix" -f $vOne.Count)
+    foreach ($v in $vTout) { Note ("  [{0,-7}] {1} [{2}]" -f $v.Engine, $v.Name, $v.Culture) }
+
+    Chk ($vTout.Count -eq ($vSapi.Count + $vOne.Count)) 'Get-DodoAllVoices reunit les deux jeux de voix'
+    Chk ($vTout.Count -gt 0) 'au moins une voix exploitable sur cette machine'
+
+    $winrt = ($null -ne (Get-DodoAsTaskMethod))
+    Note ("Projection WinRT : " + $(if ($winrt) { 'disponible' } else { 'INDISPONIBLE' }))
+    Chk $true ("projection WinRT interrogee sans exception (disponible={0})" -f $winrt)
+
+    # Le choix de voix ne doit jamais lever, meme sur un nom qui n'existe pas.
+    $vChoisie = $null
+    $leve = $false
+    try { $vChoisie = Select-DodoVoice -VoiceName 'Voix Qui N Existe Pas' -Engine 'auto' -Voices $vTout }
+    catch { $leve = $true }
+    Chk (-not $leve) 'Select-DodoVoice ne leve pas sur un nom de voix inconnu'
+    Chk ($null -ne $vChoisie) 'Select-DodoVoice retombe sur une voix disponible'
+    Chk ($null -eq (Select-DodoVoice -Voices @())) 'Select-DodoVoice renvoie null quand il n y a aucune voix'
+
+    # Conversion du debit : -10..10 vers l'echelle WinRT 0.5..2.0
+    Chk ((ConvertTo-DodoSpeakingRate 0) -eq 1.0)   'debit 0 = vitesse normale'
+    Chk ((ConvertTo-DodoSpeakingRate 10) -eq 2.0)  'debit 10 = vitesse double'
+    Chk ((ConvertTo-DodoSpeakingRate -10) -eq 0.5) 'debit -10 = vitesse moitie'
+
+    if ($vOne.Count -gt 0) {
+        # Synthese REELLE : c'est le controle fort. Un WAV valide commence par
+        # les octets 'RIFF' ; un flux vide ou tronque le ferait echouer.
+        $wav = New-DodoOneCoreWav -Text 'Ceci est un essai de la voix de Windows.' -Voice $vOne[0]
+        Chk ($null -ne $wav) 'synthese OneCore : un fichier est produit'
+        if ($null -ne $wav) {
+            $octets = [System.IO.File]::ReadAllBytes($wav)
+            Note ("WAV synthetise : {0} ({1} octets)" -f $wav, $octets.Length)
+            Chk ($octets.Length -gt 1024) 'le WAV synthetise n est pas vide'
+            $entete = [System.Text.Encoding]::ASCII.GetString($octets, 0, 4)
+            Chk ($entete -eq 'RIFF') "le fichier produit est un WAV valide (entete '$entete')"
+        }
+    }
+    else {
+        Note 'Aucune voix OneCore sur cette machine : la synthese moderne n est pas exercee ici.'
+        Chk $true 'absence de voix OneCore signalee explicitement (non teste, non ignore)'
+    }
+
+    # Le repli complet : quoi qu'il arrive, une chaine lisible, jamais d'exception.
+    $voie = ''
+    $leve = $false
+    try { $voie = Invoke-DodoSpeak -Text 'Essai de repli.' -Speech ([pscustomobject]@{ enabled = $true; engine = 'auto' }) }
+    catch { $leve = $true }
+    Chk (-not $leve) 'Invoke-DodoSpeak ne leve jamais'
+    Chk (-not [string]::IsNullOrWhiteSpace($voie)) "Invoke-DodoSpeak rend la voie utilisee ('$voie')"
+    Note ("Voie retenue : $voie")
+
+    $voieOff = Invoke-DodoSpeak -Text 'Ne doit rien dire.' -Speech ([pscustomobject]@{ enabled = $false })
+    Chk ($voieOff -eq 'voix desactivee') 'voix desactivee : rien n est prononce, et c est dit'
+
+    # Un moteur force sur 'wav' sans enregistrement ne doit pas parler.
+    $voieWav = Invoke-DodoSpeak -Text 'Rien.' -Speech ([pscustomobject]@{ enabled = $true; engine = 'wav' })
+    Chk ($voieWav -like '*aucun enregistrement*') 'moteur force sur wav sans fichier : signale, sans repli sur la synthese'
+
+    # Les deux modes de l'agent qui touchent a la voix doivent sortir en 0.
+    $rL = Invoke-Ps -Script (Join-Path $paths.Bin 'Show-DodoWarning.ps1') -Arguments @('-ListVoices')
+    Chk ($rL.Code -eq 0) "Show-DodoWarning.ps1 -ListVoices se termine en code 0 (obtenu $($rL.Code))"
+    Chk (@($rL.Lignes | Where-Object { $_ -match 'Voix disponibles' }).Count -gt 0) 'la liste des voix est restituee'
+
+    $rT = Invoke-Ps -Script (Join-Path $paths.Bin 'Show-DodoWarning.ps1') -Arguments @('-SpeakText', 'Essai.')
+    Chk ($rT.Code -eq 0) "Show-DodoWarning.ps1 -SpeakText se termine en code 0 (obtenu $($rT.Code))"
+    Chk (@($rT.Lignes | Where-Object { $_ -match 'Voie utilisee' }).Count -gt 0) 'l essai de texte indique la voie employee'
 
     # ======================================================================
     Sec 'PHASE 7 - Soiree simulee via la fenetre d essai'

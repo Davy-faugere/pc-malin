@@ -28,6 +28,7 @@ dodo/
     DodoRuntime.ps1           fichiers, cache calendrier, journal
     Invoke-DodoEnforce.ps1    agent SYSTEM : c'est lui, et lui seul, qui éteint
     Show-DodoWarning.ps1      agent session utilisateur : voix + fenêtre d'alerte
+    DodoSpeech.ps1            moteur vocal : voix modernes de Windows 11 (OneCore) + SAPI5
     Get-DodoStatus.ps1        état complet et prévisionnel nuit par nuit
     Add-DodoException.ps1     dérogation ponctuelle accordée par un parent
     Install-Dodo.ps1          installation / mise à jour
@@ -83,7 +84,8 @@ Procédure détaillée : **[docs/02-deploiement.md](docs/02-deploiement.md)**.
 | Exigence | Mécanisme | Test qui le prouve |
 |---|---|---|
 | Extinction réelle | `shutdown /s /f` émis par le compte SYSTEM | `-Phase real` |
-| Préavis vocal + rappels | 10 / 5 / 2 / 1 min, voix SAPI ou WAV enregistré, fenêtre au premier plan | `-Phase evening` |
+| Préavis vocal + rappels | 10 / 5 / 2 / 1 min, **voix française de Windows 11** (OneCore) ou WAV enregistré, fenêtre au premier plan | `-Phase evening` |
+| Texte écrit par le parent, répété | Message saisi dans l'assistant, redit toutes les N secondes pendant l'affichage | `-SpeakText`, recette Windows |
 | Résiste au redémarrage | Déclencheur « au démarrage » + répétition d'une minute | `-Phase boot` / `-Phase bootcheck` |
 | Vacances zone C automatiques | API Open Data `data.education.gouv.fr` | `-Phase calendar` |
 | Jamais d'ouverture accidentelle | Calendrier absent / périmé / illisible → **repli sur 21h00** | `-Phase calendar` |

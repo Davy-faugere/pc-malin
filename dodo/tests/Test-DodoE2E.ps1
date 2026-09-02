@@ -37,6 +37,7 @@ $Phase = @($Phase | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim(
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 . (Join-Path $srcDir 'DodoCore.ps1')
 . (Join-Path $srcDir 'DodoRuntime.ps1')
+. (Join-Path $srcDir 'DodoSpeech.ps1')
 
 $paths   = Get-DodoPaths -Root $Root
 $Pass    = 0; $Fail = 0; $Skip = 0
@@ -89,23 +90,27 @@ if (& $want 'preflight') {
     Chk $cfg.enabled 'couvre-feu actif (enabled = true)'
     Note ("mode : " + $(if ($cfg.dryRun) { 'SIMULATION' } else { 'PRODUCTION - extinction reelle' }))
 
-    $voices = @()
-    try {
-        Add-Type -AssemblyName System.Speech -ErrorAction Stop
-        $sy = New-Object System.Speech.Synthesis.SpeechSynthesizer
-        $voices = @($sy.GetInstalledVoices() | Where-Object { $_.Enabled })
-        $sy.Dispose()
+    # Les DEUX catalogues. N'interroger que System.Speech reviendrait a declarer
+    # "aucune voix francaise" sur un Windows 11 qui en a une : les voix
+    # francaises y sont du jeu OneCore, invisible pour System.Speech.
+    $voices = @(Get-DodoAllVoices)
+    $fr = @($voices | Where-Object { $_.IsFrench })
+    foreach ($v in $voices) { Note ("voix : [{0,-7}] {1} [{2}]" -f $v.Engine, $v.Name, $v.Culture) }
+    if ($fr.Count -gt 0) {
+        Chk $true ("voix francaise disponible : {0} ({1})" -f $fr[0].Name, $fr[0].Engine)
     }
-    catch { }
-    $fr = @($voices | Where-Object { $_.VoiceInfo.Culture.Name -like 'fr*' })
-    foreach ($v in $voices) { Note ("voix : {0} [{1}]" -f $v.VoiceInfo.Name, $v.VoiceInfo.Culture.Name) }
-    if ($fr.Count -gt 0) { Chk $true "voix francaise disponible : $($fr[0].VoiceInfo.Name)" }
     elseif ((Test-Path (Join-Path $paths.Media 'warning.wav')) -and (Test-Path (Join-Path $paths.Media 'shutdown.wav'))) {
         Chk $true 'pas de voix francaise, mais media\warning.wav et media\shutdown.wav sont presents'
     }
     else {
         Chk $false 'annonce vocale en francais' "aucune voix fr* et aucun WAV dans $($paths.Media) - voir docs/03-exploitation.md"
     }
+
+    # Ce que la voix dira reellement, tel qu'il est configure sur ce poste.
+    $msgsP = Get-DodoMessages -Root $Root
+    Note ('texte du preavis : "{0}"' -f $msgsP.warning)
+    $planP = @(Get-DodoSpeechPlan -DisplaySeconds $cfg.speech.displaySeconds -RepeatEverySeconds $cfg.speech.repeatEverySeconds)
+    Chk ($planP.Count -ge 1) ("message diffuse {0} fois par alerte (a {1} s)" -f $planP.Count, ($planP -join ', '))
 }
 
 # ==========================================================================

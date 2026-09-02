@@ -2,6 +2,20 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/) · Versioning : [SemVer](https://semver.org/lang/fr/)
 
+## [1.4.0] - 2026-09-02
+
+### Ajouté
+- **Voix de Windows 11 enfin utilisée.** Windows expose deux catalogues de voix qui ne se voient pas entre eux : les voix *OneCore* (celles de *Paramètres → Heure et langue → Voix*) et les voix *SAPI5* classiques. Sur une installation française, **les voix françaises sont toujours du premier jeu**, invisible pour `System.Speech` — l'interface utilisée jusqu'ici. Le message était donc lu par une voix anglaise, ou pas lu du tout. Nouveau `DodoSpeech.ps1` : les voix modernes sont atteintes par l'API WinRT `Windows.Media.SpeechSynthesis`, les deux catalogues sont fusionnés, et `-ListVoices` les affiche avec leur moteur
+- **Texte écrit par le parent.** Assistant → *Message parlé et voix…* : les trois messages (préavis, dernière minute, extinction) se saisissent dans l'interface, avec les jetons `{minutes}` et `{name}`. Plus besoin d'éditer un fichier JSON
+- **Répétition pendant le décompte.** Le message est redit toutes les `speech.repeatEverySeconds` secondes tant que la fenêtre d'alerte est affichée. La synthèse n'a lieu qu'une fois : le WAV produit est conservé et rejoué, les répétitions sont instantanées. Aucune diffusion n'est programmée à l'instant exact de la fermeture, elle serait coupée
+- Choix de la voix, du débit et du volume dans l'assistant, avec un bouton **Écouter** qui passe par le moteur réel — ce qu'on entend au réglage est ce qu'on entendra le soir
+- Coupure complète de la voix en un clic (*« Annoncer le message à voix haute »* décoché, ou `speech.engine = "off"`)
+- `Show-DodoWarning.ps1 -SpeakText "…"` : essai d'un texte quelconque en ligne de commande, avec restitution de la voie réellement employée
+- **26 assertions hors ligne** sur les réglages de voix et la cadence de répétition, et une **phase d'intégration Windows** qui exerce la synthèse réelle : énumération des deux catalogues, conversion de débit, synthèse d'un WAV dont l'en-tête `RIFF` et la taille sont vérifiés, et repli complet sans exception
+
+### Corrigé
+- Le rapport `-ValidateOnly` de l'installateur annonçait « 1 période » et un SSID fantôme quand rien n'était fourni : `@($null)` compte un élément, pas zéro. Le chemin d'installation réel n'était pas affecté, mais un diagnostic qui compte faux induit en erreur
+
 ## [1.3.0] - 2026-09-02
 
 ### Ajouté

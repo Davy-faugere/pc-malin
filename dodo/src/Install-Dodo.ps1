@@ -53,6 +53,8 @@ $ErrorActionPreference = 'Stop'
 $ScheduleFromAnswer = $null
 $HolidaysFromAnswer = $null
 $OfflineFromAnswer  = $null
+$SpeechFromAnswer   = $null
+$MessagesFromAnswer = $null
 
 if ($AnswerFile) {
     if (-not (Test-Path -LiteralPath $AnswerFile)) { throw "Fiche de reponses introuvable : $AnswerFile" }
@@ -85,6 +87,10 @@ if ($AnswerFile) {
     if ($ans.PSObject.Properties['Schedule']    -and $ans.Schedule)    { $ScheduleFromAnswer = $ans.Schedule }
     if ($ans.PSObject.Properties['Holidays'])                          { $HolidaysFromAnswer = @($ans.Holidays) }
     if ($ans.PSObject.Properties['OfflineOnly'])                       { $OfflineFromAnswer  = [bool]$ans.OfflineOnly }
+
+    # Voix et texte prononce, saisis dans l'assistant.
+    if ($ans.PSObject.Properties['Speech']   -and $ans.Speech)   { $SpeechFromAnswer   = $ans.Speech }
+    if ($ans.PSObject.Properties['Messages'] -and $ans.Messages) { $MessagesFromAnswer = $ans.Messages }
 }
 
 # Garde-fou : un chemin relatif ou porteur de quotes est le symptome d'un
@@ -105,12 +111,17 @@ if ($ValidateOnly) {
         NotifyUser         = $NotifyUser
         Production         = [bool]$Production
         ExemptUsers        = @($ExemptUsers)
-        AllowedSsid        = @($AllowedSsid)
-        AllowedAdapterName = @($AllowedAdapterName)
+        # @($null) vaut UN element, pas zero : sans ce filtre le diagnostic
+        # annoncerait un SSID ou une periode la ou il n'y en a aucun.
+        AllowedSsid        = @($AllowedSsid        | Where-Object { $null -ne $_ })
+        AllowedAdapterName = @($AllowedAdapterName | Where-Object { $null -ne $_ })
         EnableAdapterGuard = [bool]$EnableAdapterGuard
         OfflineOnly        = $OfflineFromAnswer
-        HolidayCount       = @($HolidaysFromAnswer).Count
+        HolidayCount       = @($HolidaysFromAnswer | Where-Object { $null -ne $_ }).Count
         SchoolStart        = $(if ($null -ne $ScheduleFromAnswer) { [string]$ScheduleFromAnswer.school.start } else { '' })
+        VoiceName          = $(if ($null -ne $SpeechFromAnswer -and $SpeechFromAnswer.PSObject.Properties['voiceName']) { [string]$SpeechFromAnswer.voiceName } else { '' })
+        RepeatEverySeconds = $(if ($null -ne $SpeechFromAnswer -and $SpeechFromAnswer.PSObject.Properties['repeatEverySeconds']) { [int]$SpeechFromAnswer.repeatEverySeconds } else { -1 })
+        WarningText        = $(if ($null -ne $MessagesFromAnswer -and $MessagesFromAnswer.PSObject.Properties['warning']) { [string]$MessagesFromAnswer.warning } else { '' })
     } | ConvertTo-Json -Compress)
     exit 0
 }
@@ -164,8 +175,9 @@ foreach ($d in @($paths.Root, $paths.Bin, $paths.Etc, $paths.Var, $paths.Logs, $
 }
 Ok 'Dossiers bin, etc, var, logs, media crees'
 
-$sourceFiles = @('DodoCore.ps1', 'DodoRuntime.ps1', 'Invoke-DodoEnforce.ps1', 'Show-DodoWarning.ps1',
-                 'Get-DodoStatus.ps1', 'Add-DodoException.ps1', 'Uninstall-Dodo.ps1', 'run-notify-hidden.vbs')
+$sourceFiles = @('DodoCore.ps1', 'DodoRuntime.ps1', 'DodoSpeech.ps1', 'Invoke-DodoEnforce.ps1',
+                 'Show-DodoWarning.ps1', 'Get-DodoStatus.ps1', 'Add-DodoException.ps1',
+                 'Uninstall-Dodo.ps1', 'run-notify-hidden.vbs')
 foreach ($f in $sourceFiles) {
     $src = Join-Path $PSScriptRoot $f
     if (-not (Test-Path -LiteralPath $src)) { throw "Fichier source manquant : $src" }
@@ -264,6 +276,23 @@ if ($null -ne $HolidaysFromAnswer -or $null -ne $OfflineFromAnswer) {
     }
 }
 
+if ($null -ne $SpeechFromAnswer) {
+    $spNode = Get-DodoProp $existing 'speech'
+    if ($null -eq $spNode) {
+        $spNode = [pscustomobject]@{}
+        Set-Prop $existing 'speech' $spNode
+    }
+    foreach ($cle in @('enabled', 'engine', 'voiceName', 'rate', 'volume', 'repeatEverySeconds', 'displaySeconds')) {
+        if ($SpeechFromAnswer.PSObject.Properties[$cle]) { Set-Prop $spNode $cle $SpeechFromAnswer.$cle }
+    }
+    Ok ("Voix : {0}, repetition toutes les {1} s" -f
+        $(if ([bool](Get-DodoProp $spNode 'enabled' $true)) {
+              $n = [string](Get-DodoProp $spNode 'voiceName' '')
+              if ($n) { $n } else { 'choix automatique (voix francaise si presente)' }
+          } else { 'DESACTIVEE' }),
+        [int](Get-DodoProp $spNode 'repeatEverySeconds' 20))
+}
+
 # Validation AVANT ecriture : une configuration invalide n'est jamais deployee.
 $validated = Resolve-DodoConfig $existing
 Write-DodoJson -Path $paths.Config -Object $existing
@@ -276,6 +305,25 @@ if (-not (Test-Path -LiteralPath $paths.Messages)) {
     Ok 'Messages parles installes (dodo.messages.json)'
 }
 else { Ok 'Messages parles existants conserves' }
+
+# Texte saisi par le parent. Ecrit APRES la copie du modele, sinon il serait
+# ecrase par celui-ci. Fichier lu en UTF-8 : les accents sont attendus ici.
+if ($null -ne $MessagesFromAnswer) {
+    $msgActuels = Read-DodoJson -Path $paths.Messages
+    $modifies = 0
+    foreach ($cle in @('popupTitle', 'warning', 'warningOne', 'shutdownNow', 'bootBlocked', 'popupFooter')) {
+        if (-not $MessagesFromAnswer.PSObject.Properties[$cle]) { continue }
+        $v = [string]$MessagesFromAnswer.$cle
+        if ([string]::IsNullOrWhiteSpace($v)) { continue }
+        Set-Prop $msgActuels $cle $v
+        $modifies++
+    }
+    if ($modifies -gt 0) {
+        Write-DodoJson -Path $paths.Messages -Object $msgActuels
+        Ok ("{0} texte(s) personnalise(s) par le parent enregistre(s)" -f $modifies)
+        Info ('  Preavis : "{0}"' -f [string](Get-DodoProp $msgActuels 'warning' ''))
+    }
+}
 
 # --------------------------------------------------------------------------
 Step 'Verrouillage des droits (l enfant ne doit pas pouvoir modifier)'

@@ -291,6 +291,8 @@ $reponses = [pscustomobject]@{
     AllowedAdapterName = @('Ethernet 2', 'Wi-Fi')
     EnableAdapterGuard = $true
     Production         = $false
+    Speech             = [pscustomobject]@{ voiceName = 'Microsoft Denise'; repeatEverySeconds = 15 }
+    Messages           = [pscustomobject]@{ warning = 'Malo, extinction dans {minutes} minutes.' }
 }
 [System.IO.File]::WriteAllText($fiche, ($reponses | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
 $sortie = ''
@@ -306,6 +308,11 @@ if ($null -ne $lu) {
     Assert-Equal 'Ma Box 5G'  @($lu.AllowedSsid)[0]                'le SSID a espaces arrive entier'
     Assert-Equal 2            @($lu.ExemptUsers).Count             'les comptes exemptes arrivent tous'
     Assert-Equal $true        ($lu.InstallPath -notlike '*Wi-Fi*') 'aucun debordement vers -InstallPath'
+    Assert-Equal 'Microsoft Denise' $lu.VoiceName                  'la voix choisie par le parent est transmise'
+    Assert-Equal 15                 $lu.RepeatEverySeconds         'la cadence de repetition est transmise'
+    Assert-Equal 'Malo, extinction dans {minutes} minutes.' $lu.WarningText 'le texte ecrit par le parent arrive entier'
+    # @($null) vaut 1 : le diagnostic doit compter zero, pas un fantome.
+    Assert-Equal 0            $lu.HolidayCount                     'aucune periode transmise : le rapport annonce zero'
 }
 Assert-Equal $true  ((Invoke-Installer @{ AnswerFile = '/introuvable.json'; ValidateOnly = $true }) -like '*introuvable*') 'fiche de reponses absente signalee'
 Remove-Item -LiteralPath $fiche -Force -ErrorAction SilentlyContinue
@@ -343,6 +350,69 @@ $calO = Get-DodoCalendar -Config $cfgO -Root $rootTmp -Now ([datetime]'2026-12-2
 Assert-Equal $true $calO.Trusted 'mode hors ligne avec periodes saisies : calendrier fiable'
 Assert-Equal 'Allowed' (Get-DodoState ([datetime]'2026-12-20 22:30') $cfgO $calO.Periods $calO.Trusted).State 'hors ligne, vacances de Noel : 22h30 autorise'
 Remove-Item -LiteralPath $rootTmp -Recurse -Force -ErrorAction SilentlyContinue
+
+# --------------------------------------------------------------------------
+Write-Section 'Voix : reglages et cadence de repetition'
+
+# --- valeurs par defaut
+$cfgV = Resolve-DodoConfig ([pscustomobject]@{})
+Assert-Equal $true   $cfgV.speech.enabled            'voix active par defaut'
+Assert-Equal 'auto'  $cfgV.speech.engine             'moteur automatique par defaut'
+Assert-Equal ''      $cfgV.speech.voiceName          'aucune voix imposee par defaut'
+Assert-Equal 20      $cfgV.speech.repeatEverySeconds 'repetition toutes les 20 s par defaut'
+Assert-Equal 25      $cfgV.speech.displaySeconds     'fenetre affichee 25 s par defaut'
+
+# --- fusion partielle : on ne change qu'un reglage, les autres tiennent
+$cfgV2 = Resolve-DodoConfig ([pscustomobject]@{ speech = [pscustomobject]@{ voiceName = 'Microsoft Denise' } })
+Assert-Equal 'Microsoft Denise' $cfgV2.speech.voiceName          'voix imposee prise en compte'
+Assert-Equal 20                 $cfgV2.speech.repeatEverySeconds 'les autres reglages de voix restent par defaut'
+
+# --- le nom du moteur est normalise : l'assistant peut ecrire 'OneCore'
+$cfgV3 = Resolve-DodoConfig ([pscustomobject]@{ speech = [pscustomobject]@{ engine = 'OneCore' } })
+Assert-Equal 'onecore' $cfgV3.speech.engine 'moteur normalise en minuscules'
+
+# --- validations
+Assert-Throws { Resolve-DodoConfig ([pscustomobject]@{ speech = [pscustomobject]@{ engine = 'siri' } }) }              'refus d un moteur inconnu'
+Assert-Throws { Resolve-DodoConfig ([pscustomobject]@{ speech = [pscustomobject]@{ rate = 42 } }) }                    'refus d un debit hors bornes'
+Assert-Throws { Resolve-DodoConfig ([pscustomobject]@{ speech = [pscustomobject]@{ volume = 300 } }) }                 'refus d un volume hors bornes'
+Assert-Throws { Resolve-DodoConfig ([pscustomobject]@{ speech = [pscustomobject]@{ repeatEverySeconds = -1 } }) }      'refus d une cadence negative'
+Assert-Throws { Resolve-DodoConfig ([pscustomobject]@{ speech = [pscustomobject]@{ displaySeconds = 2 } }) }           'refus d un affichage trop bref'
+# 'off' est un moteur valide : c'est ainsi que le parent coupe la voix.
+$cfgOff = Resolve-DodoConfig ([pscustomobject]@{ speech = [pscustomobject]@{ engine = 'off' } })
+Assert-Equal 'off' $cfgOff.speech.engine 'moteur off accepte : la voix se desactive'
+
+# --- cadence de diffusion pendant l affichage
+$p1 = @(Get-DodoSpeechPlan -DisplaySeconds 25 -RepeatEverySeconds 20)
+Assert-Equal 2  $p1.Count 'fenetre de 25 s, cadence 20 s : deux diffusions'
+Assert-Equal 0  $p1[0]    'la premiere diffusion a lieu des l affichage'
+Assert-Equal 20 $p1[1]    'la seconde a 20 s'
+
+$p2 = @(Get-DodoSpeechPlan -DisplaySeconds 60 -RepeatEverySeconds 15)
+Assert-Equal 4  $p2.Count 'fenetre de 60 s, cadence 15 s : quatre diffusions'
+Assert-Equal 45 $p2[3]    'la derniere a 45 s'
+# 60 s pile ne serait pas entendu : la fenetre se ferme au meme instant.
+Assert-Equal $false ($p2 -contains 60) 'aucune diffusion a l instant exact de la fermeture'
+
+$p3 = @(Get-DodoSpeechPlan -DisplaySeconds 25 -RepeatEverySeconds 0)
+Assert-Equal 1 $p3.Count 'cadence a zero : une seule diffusion'
+Assert-Equal 0 $p3[0]    'et c est celle de l affichage'
+
+$p4 = @(Get-DodoSpeechPlan -DisplaySeconds 25 -RepeatEverySeconds 40)
+Assert-Equal 1 $p4.Count 'cadence plus longue que l affichage : une seule diffusion'
+
+# Garde-fou : une cadence de 1 s sur une longue fenetre ne doit pas produire
+# des centaines de diffusions.
+$p5 = @(Get-DodoSpeechPlan -DisplaySeconds 300 -RepeatEverySeconds 1)
+Assert-Equal $true ($p5.Count -le 21) 'nombre de diffusions plafonne'
+
+# Le message final suit le sursis d extinction, pas la duree des preavis.
+$p6 = @(Get-DodoSpeechPlan -DisplaySeconds 30 -RepeatEverySeconds 20)
+Assert-Equal 2 $p6.Count 'sursis de 30 s : deux diffusions du message final'
+
+# --- le texte prononce est bien celui du parent, jetons substitues
+$perso = 'Malo, il est temps. Extinction dans {minutes} minutes.'
+Assert-Equal 'Malo, il est temps. Extinction dans 10 minutes.' `
+    (Format-DodoMessage $perso @{ minutes = 10; name = 'Malo' }) 'texte personnalise du parent, jetons substitues'
 
 # --------------------------------------------------------------------------
 Write-Section 'Purete ASCII des sources (accents interdits hors messages JSON)'

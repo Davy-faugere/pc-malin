@@ -109,19 +109,73 @@ powershell -ExecutionPolicy Bypass -File C:\ProgramData\Dodo\bin\Show-DodoWarnin
 
 La seconde commande doit **parler** et afficher la fenêtre orange.
 
-**S'il n'y a aucune voix française** — c'est fréquent sur Windows 11, dont les voix
-« modernes » (*Speech_OneCore*) ne sont pas visibles par l'interface `System.Speech`
-utilisée ici. Deux options, toutes deux valables :
+### Les deux jeux de voix de Windows
+
+Windows expose **deux catalogues de voix qui ne se voient pas entre eux**, et c'est
+la source du malentendu le plus courant :
+
+| Jeu | Où Windows les montre | Vues par `System.Speech` |
+|---|---|---|
+| **OneCore** (*modernes*) | *Paramètres → Heure et langue → Voix* | **non** |
+| SAPI5 (*classiques*) | Panneau de configuration → Synthèse vocale | oui |
+
+Sur une installation française de Windows 11, les voix françaises (Denise, Henri,
+Paul…) sont **toujours** dans le premier jeu. Une implémentation qui n'interroge que
+`System.Speech` ne les trouve donc jamais et retombe sur une voix anglaise.
+
+Dodo interroge **les deux**, via l'API WinRT `Windows.Media.SpeechSynthesis` pour les
+voix modernes. `-ListVoices` affiche les deux catalogues avec leur moteur, et la voix
+retenue par défaut :
+
+```
+ Voix disponibles : 3 OneCore (Windows 11) + 2 SAPI5 classiques, dont 2 en francais.
+
+Engine  Name                     Culture  Gender  IsFrench
+------  ----                     -------  ------  --------
+OneCore Microsoft Denise         fr-FR    Female  True
+OneCore Microsoft Henri          fr-FR    Male    True
+SAPI    Microsoft Zira Desktop   en-US    Female  False
+
+ Voix retenue par defaut : Microsoft Denise (OneCore, fr-FR)
+```
+
+**S'il n'y a toujours aucune voix française**, deux options, toutes deux valables :
 
 - *Paramètres → Heure et langue → Voix → Ajouter des voix →* **Français (France)**,
-  puis redémarrer et refaire `-ListVoices` ;
-- ou, plus simple et parfaitement fiable : **enregistrez vous-même les messages**
-  (Enregistreur vocal de Windows, export en `.wav`) et déposez-les dans
-  `C:\ProgramData\Dodo\media\` sous les noms `warning.wav` et `shutdown.wav`.
-  Ils ont la priorité sur la synthèse vocale.
+  puis refaire `-ListVoices` ;
+- ou **enregistrez vous-même les messages** (Enregistreur vocal de Windows, export en
+  `.wav`) et déposez-les dans `C:\ProgramData\Dodo\media\` sous les noms
+  `warning.wav` et `shutdown.wav`. Ils ont la priorité sur toute synthèse.
 
-Les textes prononcés se modifient dans `C:\ProgramData\Dodo\etc\dodo.messages.json`
-(fichier en UTF-8, accents autorisés ; jetons `{minutes}` et `{name}`).
+### Écrire soi-même le texte, et le faire répéter
+
+Tout se règle dans l'assistant, bouton **« Message parlé et voix… »** : la voix, le
+débit, le volume, la cadence de répétition, et les trois textes (préavis, dernière
+minute, extinction). Le bouton **Écouter** fait dire le texte avec la voix choisie,
+par le moteur réel — ce qu'on entend là est ce qu'on entendra le soir.
+
+Pendant que la fenêtre d'alerte est affichée, le message est **redit toutes les
+`repeatEverySeconds` secondes**. La synthèse n'a lieu qu'une fois : le fichier WAV
+produit est conservé et rejoué, ce qui rend les répétitions instantanées.
+
+```
+repeatEverySeconds = 20, displaySeconds = 45   ->  3 diffusions (0 s, 20 s, 40 s)
+repeatEverySeconds = 0                         ->  1 diffusion
+```
+
+Aucune diffusion n'est programmée à l'instant exact de la fermeture : elle serait
+coupée. Pour couper complètement la voix : décocher *« Annoncer le message à voix
+haute »*, ou `speech.engine = "off"`.
+
+En ligne de commande, l'essai d'un texte quelconque :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\ProgramData\Dodo\bin\Show-DodoWarning.ps1 -SpeakText "Malo, au lit."
+```
+
+Les textes restent modifiables directement dans
+`C:\ProgramData\Dodo\etc\dodo.messages.json` (UTF-8, accents autorisés ; jetons
+`{minutes}` et `{name}`).
 
 ---
 

@@ -6,24 +6,32 @@
     l'utilisateur connecte (aucun privilege necessaire). Il n'eteint rien :
     il previent, par un message vocal et une fenetre au premier plan.
 
-    Ordre de repli pour le son, du plus fiable au moins fiable :
+    Ordre de repli pour le son, du plus fiable au moins fiable (voir
+    DodoSpeech.ps1) :
       1. fichier WAV enregistre par le parent dans media\ (warning.wav / shutdown.wav)
-      2. synthese vocale SAPI5 (voix francaise si installee)
-      3. son systeme Windows
+      2. voix moderne de Windows 11 (OneCore, via WinRT) - c'est la que sont
+         les voix francaises
+      3. synthese vocale SAPI5 classique
+      4. son systeme Windows
     Aucune de ces etapes n'est bloquante : si tout echoue, la fenetre reste.
 
-    Diagnostic : -ListVoices affiche les voix reellement disponibles sur ce poste.
-    Essai manuel  : -Force -ForceMinutes 5
-    Diagnostic    : -Diagnose   (affiche tout ce que le script voit)
+    Le message est repete pendant que la fenetre est affichee, a la cadence
+    speech.repeatEverySeconds. Le WAV n'est synthetise qu'une fois puis rejoue.
+
+    Liste des voix : -ListVoices   (les DEUX jeux, OneCore et SAPI)
+    Essai manuel   : -Force -ForceMinutes 5
+    Essai d'un texte : -SpeakText "bonne nuit"
+    Diagnostic     : -Diagnose   (affiche tout ce que le script voit)
 #>
 [CmdletBinding()]
 param(
     [string]$Root,
-    [int]$DisplaySeconds = 25,
+    [int]$DisplaySeconds = 0,      # 0 = valeur de la configuration (speech.displaySeconds)
     [switch]$Force,
     [int]$ForceMinutes = 10,
     [switch]$ListVoices,
-    [switch]$Diagnose
+    [switch]$Diagnose,
+    [string]$SpeakText = ''        # prononce ce texte et sort : essai de la voix
 )
 
 Set-StrictMode -Version 2.0
@@ -31,11 +39,12 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'DodoCore.ps1')
 . (Join-Path $PSScriptRoot 'DodoRuntime.ps1')
+. (Join-Path $PSScriptRoot 'DodoSpeech.ps1')
 
 # En tache planifiee, toute erreur est avalee : une tache qui echoue chaque
 # minute est pire que le silence. En lancement MANUEL au contraire, avaler
 # l'erreur donne un "il ne se passe rien" indebogable : on l'affiche.
-$Interactif = ($Force -or $ListVoices -or $Diagnose)
+$Interactif = ($Force -or $ListVoices -or $Diagnose -or $SpeakText)
 
 $userDir = Join-Path $env:LOCALAPPDATA 'Dodo'
 function LogU { param([string]$m, [string]$l = 'INFO') Write-DodoLog -Message $m -Level $l -LogDirectory $userDir | Out-Null }
@@ -43,53 +52,27 @@ function LogU { param([string]$m, [string]$l = 'INFO') Write-DodoLog -Message $m
 # --------------------------------------------------------------------------
 # Son
 # --------------------------------------------------------------------------
-function Get-DodoVoices {
-    try {
-        Add-Type -AssemblyName System.Speech -ErrorAction Stop
-        $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
-        $v = @($s.GetInstalledVoices() | Where-Object { $_.Enabled } | ForEach-Object {
-                [pscustomobject]@{ Name = $_.VoiceInfo.Name; Culture = $_.VoiceInfo.Culture.Name; Gender = $_.VoiceInfo.Gender }
-            })
-        $s.Dispose()
-        return $v
-    }
-    catch { return @() }
-}
-
 function Start-DodoSound {
-    <# Joue le message. Ne bloque pas et ne leve jamais d'exception. #>
-    param([string]$Text, [string]$WavPath)
-
-    if ($WavPath -and (Test-Path -LiteralPath $WavPath)) {
-        try {
-            $player = New-Object System.Media.SoundPlayer $WavPath
-            $player.Play()
-            return 'wav'
-        }
-        catch { LogU "Lecture de $WavPath impossible : $($_.Exception.Message)" 'WARN' }
-    }
-
-    try {
-        Add-Type -AssemblyName System.Speech -ErrorAction Stop
-        $script:DodoSynth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-        $fr = @($script:DodoSynth.GetInstalledVoices() |
-                Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -like 'fr*' }) | Select-Object -First 1
-        if ($fr) { $script:DodoSynth.SelectVoice($fr.VoiceInfo.Name) }
-        $script:DodoSynth.Volume = 100
-        $script:DodoSynth.SpeakAsync($Text) | Out-Null
-        return $(if ($fr) { 'voix ' + $fr.VoiceInfo.Name } else { 'voix par defaut (aucune voix francaise installee)' })
-    }
-    catch { LogU "Synthese vocale indisponible : $($_.Exception.Message)" 'WARN' }
-
-    try { [System.Media.SystemSounds]::Exclamation.Play(); return 'son systeme' } catch { }
-    return 'aucun'
+    <#
+        Diffuse le message. Delegue a DodoSpeech.ps1, qui sait atteindre les
+        voix modernes de Windows 11. Ne bloque pas, ne leve jamais.
+    #>
+    param([string]$Text, [string]$WavPath, $Speech = $null)
+    return (Invoke-DodoSpeak -Text $Text -WavPath $WavPath -Speech $Speech `
+                -OnLog { param($m, $n) LogU $m $n })
 }
 
 # --------------------------------------------------------------------------
 # Fenetre
 # --------------------------------------------------------------------------
 function Show-DodoPopup {
-    param([string]$Title, [string]$Line1, [string]$Line2, [int]$Seconds, [string]$Accent = 'orange')
+    <#
+        Fenetre au premier plan. -SpeakAt donne les instants, en secondes
+        depuis l'affichage, auxquels rediffuser le message : c'est ainsi que
+        la voix repete l'annonce pendant que la fenetre est a l'ecran.
+    #>
+    param([string]$Title, [string]$Line1, [string]$Line2, [int]$Seconds,
+          [string]$Accent = 'orange', $SpeakAt = @(), [scriptblock]$OnSpeak = $null)
     try {
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
         Add-Type -AssemblyName System.Drawing -ErrorAction Stop
@@ -143,8 +126,27 @@ function Show-DodoPopup {
         $timer.Add_Tick({ $this.Stop(); $script:DodoForm.Close() })
         $timer.Start()
 
+        # Rediffusion pendant l'affichage. Les gestionnaires d'evenement ne
+        # voient pas les variables locales : tout passe par la portee script.
+        $script:DodoEcoule  = 0
+        $script:DodoSpeakAt = @(@($SpeakAt) | Where-Object { $_ -gt 0 })
+        $script:DodoOnSpeak = $OnSpeak
+        $repete = $null
+        if ($script:DodoSpeakAt.Count -gt 0 -and $null -ne $OnSpeak) {
+            $repete = New-Object System.Windows.Forms.Timer
+            $repete.Interval = 1000
+            $repete.Add_Tick({
+                $script:DodoEcoule++
+                if ($script:DodoSpeakAt -contains $script:DodoEcoule) {
+                    try { & $script:DodoOnSpeak } catch { }
+                }
+            })
+            $repete.Start()
+        }
+
         $script:DodoForm.Add_Shown({ $script:DodoForm.Activate(); $script:DodoForm.BringToFront() })
         [void]$script:DodoForm.ShowDialog()
+        if ($null -ne $repete) { $repete.Stop(); $repete.Dispose() }
         $timer.Dispose()
         $script:DodoForm.Dispose()
         return $true
@@ -160,11 +162,33 @@ function Show-DodoPopup {
 # --------------------------------------------------------------------------
 try {
     if ($ListVoices) {
-        $v = @(Get-DodoVoices)
-        if ($v.Count -eq 0) { Write-Host 'Aucune voix SAPI5 exploitable sur ce poste.' -ForegroundColor Yellow }
-        else { $v | Format-Table -AutoSize | Out-String | Write-Host }
-        Write-Host "Note : les voix 'modernes' de Windows 11 (Speech_OneCore) ne sont pas visibles par System.Speech." -ForegroundColor DarkGray
-        Write-Host "Si aucune voix francaise n'apparait : deposer media\warning.wav et media\shutdown.wav." -ForegroundColor DarkGray
+        $rap = Get-DodoSpeechReport
+        Write-Host ''
+        Write-Host (' Voix disponibles : {0} OneCore (Windows 11) + {1} SAPI5 classiques, dont {2} en francais.' -f
+                    $rap.OneCoreCount, $rap.SapiCount, $rap.FrenchCount) -ForegroundColor White
+        Write-Host ''
+        if (@($rap.Voices).Count -eq 0) {
+            Write-Host ' Aucune voix exploitable sur ce poste.' -ForegroundColor Yellow
+        }
+        else {
+            $rap.Voices | Select-Object Engine, Name, Culture, Gender, IsFrench |
+                Format-Table -AutoSize | Out-String | Write-Host
+        }
+        if ($null -ne $rap.Selected) {
+            Write-Host (' Voix retenue par defaut : {0} ({1}, {2})' -f
+                        $rap.Selected.Name, $rap.Selected.Engine, $rap.Selected.Culture) -ForegroundColor Green
+        }
+        if ($rap.FrenchCount -eq 0) {
+            Write-Host ''
+            Write-Host " Aucune voix francaise installee. Pour en ajouter :" -ForegroundColor Yellow
+            Write-Host "   Parametres > Heure et langue > Voix > Ajouter des voix > Francais" -ForegroundColor DarkGray
+            Write-Host "   A defaut, deposer vos propres enregistrements dans media\warning.wav et media\shutdown.wav." -ForegroundColor DarkGray
+        }
+        if (-not $rap.WinRtAvailable) {
+            Write-Host ''
+            Write-Host " WinRT indisponible : les voix modernes de Windows ne peuvent pas etre atteintes." -ForegroundColor Yellow
+        }
+        Write-Host ''
         exit 0
     }
 
@@ -185,9 +209,14 @@ try {
         D 'Dossier media'   $paths.Media                (Test-Path -LiteralPath $paths.Media)
         D 'warning.wav'     (Join-Path $paths.Media 'warning.wav')  (Test-Path -LiteralPath (Join-Path $paths.Media 'warning.wav'))
         D 'Journal utilisateur' $userDir
-        $vv = @(Get-DodoVoices)
-        D 'Voix SAPI5'      ("{0} trouvee(s)" -f $vv.Count) ($vv.Count -gt 0)
-        foreach ($x in $vv) { Write-Host ("      - {0} [{1}]" -f $x.Name, $x.Culture) -ForegroundColor DarkGray }
+        $rap = Get-DodoSpeechReport
+        D 'WinRT (voix Windows 11)' $(if ($rap.WinRtAvailable) { 'disponible' } else { 'INDISPONIBLE' }) $rap.WinRtAvailable
+        D 'Voix installees'  ("{0} OneCore + {1} SAPI5, dont {2} en francais" -f
+                              $rap.OneCoreCount, $rap.SapiCount, $rap.FrenchCount) ($rap.FrenchCount -gt 0)
+        foreach ($x in @($rap.Voices)) {
+            Write-Host ("      - [{0,-7}] {1} [{2}]" -f $x.Engine, $x.Name, $x.Culture) -ForegroundColor DarkGray
+        }
+        D 'Voix retenue'     $(if ($null -ne $rap.Selected) { '{0} ({1})' -f $rap.Selected.Name, $rap.Selected.Engine } else { 'aucune' }) ($null -ne $rap.Selected)
         $wf = $true
         try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; Add-Type -AssemblyName System.Drawing -ErrorAction Stop }
         catch { $wf = $false }
@@ -200,10 +229,34 @@ try {
             foreach ($n in $cal0.Notes) { Write-Host "      ! $n" -ForegroundColor Yellow }
             $st0 = Get-DodoState -Now (Get-DodoNow -Config $c0 -Root $Root) -Config $c0 -Periods $cal0.Periods -CalendarTrusted $cal0.Trusted
             D 'Etat courant' ("{0} - extinction {1}" -f $st0.State, $st0.BlockStart.ToString('dd/MM HH:mm')) $true
+            $plan0 = @(Get-DodoSpeechPlan -DisplaySeconds $c0.speech.displaySeconds `
+                                          -RepeatEverySeconds $c0.speech.repeatEverySeconds)
+            D 'Voix (configuration)' ("active={0} moteur={1} voix='{2}' debit={3} volume={4}" -f
+                $c0.speech.enabled, $c0.speech.engine,
+                $(if ($c0.speech.voiceName) { $c0.speech.voiceName } else { 'automatique' }),
+                $c0.speech.rate, $c0.speech.volume) ([bool]$c0.speech.enabled)
+            D 'Diffusions par fenetre' ("{0} (a {1} s ; fenetre affichee {2} s)" -f
+                $plan0.Count, ($plan0 -join ', '), $c0.speech.displaySeconds) $true
         }
         catch { D 'Configuration lue' ("ECHEC : " + $_.Exception.Message) $false }
         Write-Host ''
         if (-not $Force) { exit 0 }
+    }
+
+    if ($SpeakText) {
+        $cfgV = $null
+        try { $cfgV = Get-DodoConfiguration -Root $Root } catch { }
+        $spV = $null
+        if ($null -ne $cfgV -and $cfgV.PSObject.Properties['speech']) { $spV = $cfgV.speech }
+        $comment = Invoke-DodoSpeak -Text $SpeakText -Speech $spV
+        Write-Host ''
+        Write-Host (" Texte prononce : {0}" -f $SpeakText)
+        Write-Host (" Voie utilisee  : {0}" -f $comment) -ForegroundColor Green
+        Write-Host ''
+        # La lecture est asynchrone : sans cette attente le processus se
+        # termine avant que le son soit sorti des haut-parleurs.
+        Start-Sleep -Seconds ([math]::Min(30, 2 + [int]($SpeakText.Length / 12)))
+        exit 0
     }
 
     $cfg   = Get-DodoConfiguration -Root $Root
@@ -213,11 +266,21 @@ try {
 
     $name = $env:USERNAME
 
+    # -DisplaySeconds l'emporte s'il est fourni ; sinon la configuration decide.
+    $secondes = $DisplaySeconds
+    if ($secondes -le 0) { $secondes = [int]$cfg.speech.displaySeconds }
+    if ($secondes -le 0) { $secondes = 25 }
+    $plan = @(Get-DodoSpeechPlan -DisplaySeconds $secondes -RepeatEverySeconds ([int]$cfg.speech.repeatEverySeconds))
+    Clear-DodoSpeechCache
+
     if ($Force) {
         $txt = Format-DodoMessage $msgs.warning @{ minutes = $ForceMinutes; name = $name }
-        $how = Start-DodoSound -Text $txt -WavPath (Join-Path $paths.Media 'warning.wav')
-        LogU "Essai manuel : $how"
-        [void](Show-DodoPopup -Title $msgs.popupTitle -Line1 ("Extinction dans $ForceMinutes minutes") -Line2 $txt -Seconds $DisplaySeconds)
+        $wav = Join-Path $paths.Media 'warning.wav'
+        $how = Start-DodoSound -Text $txt -WavPath $wav -Speech $cfg.speech
+        LogU "Essai manuel : $how ; $($plan.Count) diffusion(s) prevue(s)"
+        $script:DodoRedire = { [void](Start-DodoSound -Text $txt -WavPath $wav -Speech $cfg.speech) }.GetNewClosure()
+        [void](Show-DodoPopup -Title $msgs.popupTitle -Line1 ("Extinction dans $ForceMinutes minutes") `
+                              -Line2 $txt -Seconds $secondes -SpeakAt $plan -OnSpeak $script:DodoRedire)
         exit 0
     }
 
@@ -239,9 +302,16 @@ try {
         if (Test-Path -LiteralPath $marker) { exit 0 }
         Write-DodoText -Path $marker -Content (Get-Date).ToString('o')
         $txt = Format-DodoMessage $msgs.shutdownNow @{ name = $name; minutes = 0 }
-        $how = Start-DodoSound -Text $txt -WavPath (Join-Path $paths.Media 'shutdown.wav')
+        $wav = Join-Path $paths.Media 'shutdown.wav'
+        $how = Start-DodoSound -Text $txt -WavPath $wav -Speech $cfg.speech
         LogU "Message d'extinction diffuse ($how) - fenetre $($state.BlockStart.ToString('yyyy-MM-dd HH:mm'))" 'ACTION'
-        [void](Show-DodoPopup -Title $msgs.popupTitle -Line1 'Extinction en cours' -Line2 $txt -Seconds ([math]::Max(10, $cfg.shutdownGraceSeconds)) -Accent 'red')
+        # La fenetre finale dure le sursis d'extinction : la cadence de
+        # repetition est recalculee sur cette duree, pas sur celle des preavis.
+        $secFinal  = [math]::Max(10, $cfg.shutdownGraceSeconds)
+        $planFinal = @(Get-DodoSpeechPlan -DisplaySeconds $secFinal -RepeatEverySeconds ([int]$cfg.speech.repeatEverySeconds))
+        $script:DodoRedire = { [void](Start-DodoSound -Text $txt -WavPath $wav -Speech $cfg.speech) }.GetNewClosure()
+        [void](Show-DodoPopup -Title $msgs.popupTitle -Line1 'Extinction en cours' -Line2 $txt `
+                              -Seconds $secFinal -Accent 'red' -SpeakAt $planFinal -OnSpeak $script:DodoRedire)
         exit 0
     }
 
@@ -255,11 +325,14 @@ try {
     $mins = [math]::Max(1, $state.MinutesToBlock)
     $tpl  = if ($mins -eq 1) { $msgs.warningOne } else { $msgs.warning }
     $txt  = Format-DodoMessage $tpl @{ minutes = $mins; name = $name }
-    $how  = Start-DodoSound -Text $txt -WavPath (Join-Path $paths.Media 'warning.wav')
-    LogU "Preavis diffuse a $mins min (seuils $(($due) -join ',')) via $how" 'ACTION'
+    $wav  = Join-Path $paths.Media 'warning.wav'
+    $how  = Start-DodoSound -Text $txt -WavPath $wav -Speech $cfg.speech
+    LogU "Preavis diffuse a $mins min (seuils $(($due) -join ',')) via $how ; $($plan.Count) diffusion(s)" 'ACTION'
 
     $l1 = if ($mins -eq 1) { 'Extinction dans 1 minute' } else { "Extinction dans $mins minutes" }
-    [void](Show-DodoPopup -Title $msgs.popupTitle -Line1 $l1 -Line2 "$txt`r`n`r`n$($msgs.popupFooter)" -Seconds $DisplaySeconds)
+    $script:DodoRedire = { [void](Start-DodoSound -Text $txt -WavPath $wav -Speech $cfg.speech) }.GetNewClosure()
+    [void](Show-DodoPopup -Title $msgs.popupTitle -Line1 $l1 -Line2 "$txt`r`n`r`n$($msgs.popupFooter)" `
+                          -Seconds $secondes -SpeakAt $plan -OnSpeak $script:DodoRedire)
     exit 0
 }
 catch {

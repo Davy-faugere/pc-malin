@@ -15,7 +15,7 @@ import zipfile
 CMD = 'dist/Dodo-Installateur.cmd'
 EXE = 'dist/Dodo-Installateur.exe'
 ATTENDUS = [
-    'src/Assistant-Dodo.ps1', 'src/DodoCore.ps1', 'src/DodoRuntime.ps1',
+    'src/Assistant-Dodo.ps1', 'src/DodoCore.ps1', 'src/DodoRuntime.ps1', 'src/DodoSpeech.ps1',
     'src/Install-Dodo.ps1', 'src/Invoke-DodoEnforce.ps1', 'src/Show-DodoWarning.ps1',
     'src/Get-DodoStatus.ps1', 'src/Add-DodoException.ps1', 'src/Uninstall-Dodo.ps1',
     'src/dodo.config.json', 'src/dodo.messages.json', 'src/run-notify-hidden.vbs',

@@ -61,6 +61,16 @@
     ],
     "_commentaire_overrides": "Periodes de vacances saisies a la main. Elles font autorite meme sans Internet. Relevees le 02/09/2026 sur data.education.gouv.fr (zone C). 'endExclusive' est le JOUR DE LA RENTREE, donc le lendemain du dernier jour de vacances. Le Pont de l'Ascension 2027 n'y figure pas : sa duree n'est pas publiee dans la source."
   },
+  "speech": {
+    "_commentaire": "Voix et repetition. 'engine' : auto (recommande), onecore (voix modernes de Windows 11, les seules qui parlent francais), sapi (voix classiques), wav (uniquement les enregistrements du parent dans media\\), off (aucun son). 'voiceName' vide = premiere voix francaise trouvee. 'repeatEverySeconds' a 0 = le message n'est dit qu'une fois.",
+    "enabled": true,
+    "engine": "auto",
+    "voiceName": "",
+    "rate": 0,
+    "volume": 100,
+    "repeatEverySeconds": 20,
+    "displaySeconds": 25
+  },
   "adapterGuard": {
     "enabled": false,
     "allowedPnpDeviceIds": []

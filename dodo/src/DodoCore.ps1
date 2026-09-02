@@ -104,6 +104,15 @@ function New-DodoDefaultConfig {
         }
         adapterGuard            = [pscustomobject]@{ enabled = $false; allowedPnpDeviceIds = @() }
         wifi                    = [pscustomobject]@{ enforceSsidFilter = $false; allowedSsids = @() }
+        speech                  = [pscustomobject]@{
+            enabled            = $true
+            engine             = 'auto'
+            voiceName          = ''
+            rate               = 0
+            volume             = 100
+            repeatEverySeconds = 20
+            displaySeconds     = 25
+        }
         testWindow              = $null
     }
 }
@@ -119,6 +128,7 @@ function Resolve-DodoConfig {
     $cal   = Get-DodoProp $UserConfig 'calendar'
     $ag    = Get-DodoProp $UserConfig 'adapterGuard'
     $wifi  = Get-DodoProp $UserConfig 'wifi'
+    $sp    = Get-DodoProp $UserConfig 'speech'
 
     $cfg = [pscustomobject]@{
         enabled                 = [bool](Get-DodoProp $UserConfig 'enabled' $d.enabled)
@@ -155,6 +165,15 @@ function Resolve-DodoConfig {
             enforceSsidFilter = [bool](Get-DodoProp $wifi 'enforceSsidFilter' $d.wifi.enforceSsidFilter)
             allowedSsids      = @(Get-DodoProp $wifi 'allowedSsids' $d.wifi.allowedSsids)
         }
+        speech                  = [pscustomobject]@{
+            enabled            = [bool](Get-DodoProp $sp 'enabled' $d.speech.enabled)
+            engine             = ([string](Get-DodoProp $sp 'engine' $d.speech.engine)).ToLowerInvariant()
+            voiceName          = [string](Get-DodoProp $sp 'voiceName' $d.speech.voiceName)
+            rate               = [int](Get-DodoProp $sp 'rate' $d.speech.rate)
+            volume             = [int](Get-DodoProp $sp 'volume' $d.speech.volume)
+            repeatEverySeconds = [int](Get-DodoProp $sp 'repeatEverySeconds' $d.speech.repeatEverySeconds)
+            displaySeconds     = [int](Get-DodoProp $sp 'displaySeconds' $d.speech.displaySeconds)
+        }
         testWindow              = (Get-DodoProp $UserConfig 'testWindow')
     }
 
@@ -182,6 +201,23 @@ function Resolve-DodoConfig {
     if ($cfg.calendar.openEndedSummerEnd -notmatch '^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$') {
         throw "calendar.openEndedSummerEnd doit etre au format MM-JJ (ex. 09-01)."
     }
+    $moteursConnus = @('auto', 'onecore', 'sapi', 'wav', 'off')
+    if ($cfg.speech.engine -notin $moteursConnus) {
+        throw ("speech.engine : '{0}' inconnu. Valeurs admises : {1}." -f $cfg.speech.engine, ($moteursConnus -join ', '))
+    }
+    if ($cfg.speech.rate -lt -10 -or $cfg.speech.rate -gt 10) {
+        throw "speech.rate doit etre compris entre -10 (tres lent) et 10 (tres rapide)."
+    }
+    if ($cfg.speech.volume -lt 0 -or $cfg.speech.volume -gt 100) {
+        throw "speech.volume doit etre compris entre 0 et 100."
+    }
+    if ($cfg.speech.repeatEverySeconds -lt 0 -or $cfg.speech.repeatEverySeconds -gt 300) {
+        throw "speech.repeatEverySeconds doit etre compris entre 0 (aucune repetition) et 300."
+    }
+    if ($cfg.speech.displaySeconds -lt 5 -or $cfg.speech.displaySeconds -gt 300) {
+        throw "speech.displaySeconds doit etre compris entre 5 et 300."
+    }
+
     if ($null -ne $cfg.testWindow) {
         $tw = Get-DodoTestWindow $cfg   # leve si mal forme
         if ($null -eq $tw) { throw "testWindow present mais illisible : 'start' et 'end' doivent etre des dates completes (ex. 2026-09-02T21:12:00)." }
@@ -531,4 +567,36 @@ function Format-DodoMessage {
     $out = $Template
     foreach ($k in $Tokens.Keys) { $out = $out.Replace('{' + $k + '}', [string]$Tokens[$k]) }
     return $out
+}
+
+function Get-DodoSpeechPlan {
+    <#
+        Instants, en secondes depuis l'apparition de la fenetre, auxquels le
+        message doit etre prononce.
+
+        0 est toujours present : le message est dit des l'affichage. Ensuite il
+        est repete toutes les RepeatEverySeconds tant que la fenetre reste a
+        l'ecran. Une repetition qui tomberait pile a la fermeture n'est pas
+        programmee : elle serait coupee.
+
+        Fonction pure, sans effet de bord : c'est la cadence qui est testee
+        hors ligne, pas le son.
+    #>
+    param(
+        [int]$DisplaySeconds,
+        [int]$RepeatEverySeconds,
+        [int]$MaxRepeats = 20
+    )
+    $plan = New-Object System.Collections.Generic.List[int]
+    $plan.Add(0)
+
+    if ($RepeatEverySeconds -gt 0 -and $DisplaySeconds -gt 0) {
+        $t = $RepeatEverySeconds
+        while ($t -lt $DisplaySeconds -and $plan.Count -le $MaxRepeats) {
+            $plan.Add($t)
+            $t += $RepeatEverySeconds
+        }
+    }
+    # Pas de virgule devant le retour : les appelants enveloppent dans @(...)
+    return $plan.ToArray()
 }
