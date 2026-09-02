@@ -482,17 +482,42 @@ Step 'Reseau (facultatif)'
 if ($PSBoundParameters.ContainsKey('AllowedSsid')) {
     $hasWifi = $false
     try { $hasWifi = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.InterfaceDescription -match 'Wi-?Fi|Wireless|802\.11' }).Count -gt 0 } catch { }
-    if (-not $hasWifi) { Warn 'Aucune carte Wi-Fi detectee : filtre SSID non applique (normal sur un poste fixe Ethernet).' }
+
+    foreach ($s in $AllowedSsid) {
+        if ($s -match '[''"]') { throw "SSID invalide : $s. Les apostrophes et guillemets ne sont pas acceptes." }
+        if ([string]::IsNullOrWhiteSpace($s)) { throw 'SSID vide : refus.' }
+    }
+
+    if (-not $hasWifi) {
+        Warn 'Aucune carte Wi-Fi detectee : filtre SSID non applique (normal sur un poste fixe Ethernet).'
+    }
+    elseif ($validated.dryRun) {
+        # Un filtre Wi-Fi mal renseigne rend TOUS les reseaux invisibles. En
+        # mode simulation on annonce ce qui serait applique, on n'applique rien :
+        # "rien ne change" doit valoir pour le reseau comme pour l'extinction.
+        Warn 'Mode SIMULATION : le filtre Wi-Fi n est PAS applique.'
+        Info ("Il le sera a la mise en service, avec pour seuls SSID autorises : " + ($AllowedSsid -join ', '))
+    }
     else {
         & netsh.exe wlan delete filter permission=denyall networktype=infrastructure 2>&1 | Out-Null
+        $poses = 0
         foreach ($s in $AllowedSsid) {
             $out = & netsh.exe wlan add filter permission=allow ssid="$s" networktype=infrastructure 2>&1
-            Info "allow '$s' : $($out -join ' ')"
+            if ($LASTEXITCODE -eq 0) { $poses++; Info "allow '$s' : accepte" }
+            else { Warn "allow '$s' refuse : $($out -join ' ')" }
         }
-        $out = & netsh.exe wlan add filter permission=denyall networktype=infrastructure 2>&1
-        Info "denyall : $($out -join ' ')"
-        Ok 'Filtre Wi-Fi applique : seuls les SSID autorises sont connectables'
-        Info 'Verification : netsh wlan show filters'
+        if ($poses -eq 0) {
+            # Sans aucune autorisation acceptee, poser denyall couperait tout
+            # le Wi-Fi du poste. On s'abstient plutot que d'isoler la machine.
+            Warn 'Aucun SSID autorise n a pu etre pose : denyall NON applique, le Wi-Fi reste libre.'
+        }
+        else {
+            $out = & netsh.exe wlan add filter permission=denyall networktype=infrastructure 2>&1
+            if ($LASTEXITCODE -eq 0) { Ok "Filtre Wi-Fi applique : $poses SSID autorise(s), tout le reste bloque" }
+            else { Warn "denyall refuse : $($out -join ' ')" }
+        }
+        foreach ($l in @(& netsh.exe wlan show filters 2>&1)) { if ($l -match '\S') { Info $l.Trim() } }
+        Info 'En cas de souci : netsh wlan delete filter permission=denyall networktype=infrastructure'
     }
 }
 else { Info 'Filtre Wi-Fi non demande (-AllowedSsid).' }

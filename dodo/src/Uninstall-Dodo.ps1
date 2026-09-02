@@ -39,22 +39,29 @@ try { Start-Process -FilePath 'shutdown.exe' -ArgumentList @('/a') -NoNewWindow 
 
 # 3. Regles reseau
 if (-not $KeepNetworkRules) {
+    # INCONDITIONNEL : le filtre denyall rend tous les reseaux Wi-Fi invisibles.
+    # Le retirer ne doit dependre ni de la lisibilite de la configuration, ni
+    # de l'emplacement de l'installation. C'est le geste de secours.
+    & netsh.exe wlan delete filter permission=denyall networktype=infrastructure 2>&1 | Out-Null
+    & netsh.exe wlan delete filter permission=denyall networktype=adhoc 2>&1 | Out-Null
+    Ok 'filtre Wi-Fi denyall retire : tous les reseaux redeviennent visibles'
+
+    # Puis les autorisations nominatives, si la configuration est lisible.
     try {
         $cfg = Get-DodoConfiguration -Root $Root
-        if ($cfg.wifi.enforceSsidFilter) {
-            & netsh.exe wlan delete filter permission=denyall networktype=infrastructure 2>&1 | Out-Null
-            foreach ($s in @($cfg.wifi.allowedSsids)) {
-                & netsh.exe wlan delete filter permission=allow ssid="$s" networktype=infrastructure 2>&1 | Out-Null
-            }
-            Ok 'filtres Wi-Fi retires'
-        }
-        if ($cfg.adapterGuard.enabled) {
-            foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Disabled' })) {
-                try { Enable-NetAdapter -Name $a.Name -Confirm:$false -ErrorAction Stop; Ok "carte reactivee : $($a.Name)" } catch { }
-            }
+        foreach ($s in @($cfg.wifi.allowedSsids)) {
+            & netsh.exe wlan delete filter permission=allow ssid="$s" networktype=infrastructure 2>&1 | Out-Null
         }
     }
-    catch { Warn "regles reseau : $($_.Exception.Message)" }
+    catch { Warn "configuration illisible, filtres nominatifs non retires : $($_.Exception.Message)" }
+
+    Write-Host '  Filtres restants :' -ForegroundColor DarkGray
+    foreach ($l in @(& netsh.exe wlan show filters 2>&1)) { if ($l -match '\S') { Write-Host "      $l" -ForegroundColor DarkGray } }
+
+    # Cartes reseau : reactivation inconditionnelle elle aussi.
+    foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Disabled' })) {
+        try { Enable-NetAdapter -Name $a.Name -Confirm:$false -ErrorAction Stop; Ok "carte reactivee : $($a.Name)" } catch { }
+    }
 }
 else { Warn 'regles reseau conservees (-KeepNetworkRules)' }
 
