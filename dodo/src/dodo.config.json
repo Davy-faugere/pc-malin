@@ -1,0 +1,32 @@
+{
+  "_lisezmoi": "Configuration du couvre-feu Dodo. Voir dodo/docs/03-exploitation.md. Toute modification prend effet a la minute suivante, sans redemarrage.",
+
+  "enabled": true,
+  "dryRun": true,
+
+  "zone": "Zone C",
+  "schedule": {
+    "school":  { "start": "21:00", "end": "06:30" },
+    "holiday": { "start": "23:00", "end": "06:30" }
+  },
+
+  "warningMinutes": [10, 5, 2, 1],
+  "shutdownGraceSeconds": 30,
+  "bootGraceSeconds": 90,
+
+  "strictNightBeforeReturn": true,
+  "lateEveningsDuringTerm": [],
+  "exemptUsers": [],
+
+  "calendar": {
+    "apiUrl": "https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-calendrier-scolaire/records",
+    "maxCacheAgeDays": 21,
+    "excludePopulations": ["Enseignants"],
+    "openEndedSummerEnd": "09-01",
+    "offlineOnly": false,
+    "overrides": []
+  },
+
+  "adapterGuard": { "enabled": false, "allowedPnpDeviceIds": [] },
+  "wifi": { "enforceSsidFilter": false, "allowedSsids": [] }
+}
