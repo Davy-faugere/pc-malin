@@ -22,8 +22,28 @@ permissions:
   contents: write
 
 jobs:
+  # Rien ne se publie sans etre passe par une machine Windows reelle :
+  # ACL NTFS, planificateur de taches, passage d'arguments et netsh ne sont
+  # observables nulle part ailleurs.
+  windows:
+    name: Validation sur Windows reel
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests hors ligne sous Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\dodo\tests\Test-DodoLogic.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Installation, verification et desinstallation reelles
+        shell: powershell
+        run: |
+          .\dodo\tests\Test-DodoWindows.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
   build:
     runs-on: ubuntu-latest
+    needs: windows
     steps:
       - uses: actions/checkout@v4
 

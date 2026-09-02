@@ -1,0 +1,70 @@
+name: CI Dodo
+
+on:
+  push:
+    paths: ['dodo/**', '.github/workflows/ci-dodo.yml']
+  pull_request:
+    paths: ['dodo/**', '.github/workflows/ci-dodo.yml']
+  workflow_dispatch:
+
+jobs:
+  logique:
+    name: Noyau de decision (Linux, PowerShell 7)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests hors ligne
+        shell: bash
+        run: |
+          if ! command -v pwsh >/dev/null 2>&1; then
+            curl -sSL -o /tmp/pwsh.tar.gz \
+              https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz
+            sudo mkdir -p /opt/pwsh && sudo tar -xzf /tmp/pwsh.tar.gz -C /opt/pwsh
+            sudo chmod +x /opt/pwsh/pwsh && sudo ln -sf /opt/pwsh/pwsh /usr/local/bin/pwsh
+          fi
+          TZ=Europe/Paris pwsh -NoProfile -File dodo/tests/Test-DodoLogic.ps1
+
+  windows:
+    name: Integration reelle (Windows, PowerShell 5.1)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Windows PowerShell 5.1 : c'est le moteur qui execute Dodo en production.
+      # Les sources n'avaient jusqu'ici jamais ete analysees par lui.
+      - name: Tests hors ligne sous Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion
+          .\dodo\tests\Test-DodoLogic.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # Installation reelle : ACL NTFS, planificateur, passage d'arguments,
+      # netsh. C'est la couche que les tests hors ligne ne peuvent pas voir.
+      - name: Installation, verification et desinstallation reelles
+        shell: powershell
+        run: |
+          .\dodo\tests\Test-DodoWindows.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Etat des taches en cas d echec
+        if: failure()
+        shell: powershell
+        run: |
+          Get-ScheduledTask -TaskPath '\Dodo\' -ErrorAction SilentlyContinue |
+            Format-List TaskName, State, Triggers, Actions, Principal
+          Get-ChildItem -Path (Join-Path $env:ProgramData 'Dodo\logs') -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-Content $_.FullName -Tail 40 }
+
+  livrables:
+    name: Construction des livrables
+    runs-on: ubuntu-latest
+    needs: [logique, windows]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer mono
+        run: sudo apt-get update && sudo apt-get install -y mono-mcs mono-devel
+      - name: Construire
+        run: bash dodo/build/build.sh
+      - name: Verifier les livrables
+        run: python3 dodo/build/verify.py

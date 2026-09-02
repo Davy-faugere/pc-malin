@@ -276,9 +276,9 @@ function Invoke-Installer {
     catch { return $_.Exception.Message }
 }
 
-Assert-Equal $true ((Invoke-Installer @{ InstallPath = "2','Wi-Fi'" }) -like "*Chemin d'installation invalide*") 'chemin issu d un debordement de parametre refuse'
-Assert-Equal $true ((Invoke-Installer @{ InstallPath = 'dodo' })       -like "*Chemin d'installation invalide*") 'chemin relatif refuse'
-Assert-Equal $true ((Invoke-Installer @{ InstallPath = ([System.IO.Path]::GetTempPath() + 'D'); NotifyUser = "'Malo'" }) -like '*Nom de compte invalide*') 'compte porteur d apostrophes refuse'
+Assert-Equal $true ((Invoke-Installer @{ InstallPath = "2','Wi-Fi'"; ValidateOnly = $true }) -like "*Chemin d'installation invalide*") 'chemin issu d un debordement de parametre refuse'
+Assert-Equal $true ((Invoke-Installer @{ InstallPath = 'dodo'; ValidateOnly = $true })       -like "*Chemin d'installation invalide*") 'chemin relatif refuse'
+Assert-Equal $true ((Invoke-Installer @{ InstallPath = ([System.IO.Path]::GetTempPath() + 'D'); NotifyUser = "'Malo'"; ValidateOnly = $true }) -like '*Nom de compte invalide*') 'compte porteur d apostrophes refuse'
 
 # Chemin nominal : une fiche de reponses contenant justement des valeurs a
 # espaces doit etre lue sans encombre, jusqu'au controle de plateforme.
@@ -293,11 +293,21 @@ $reponses = [pscustomobject]@{
     Production         = $false
 }
 [System.IO.File]::WriteAllText($fiche, ($reponses | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
-$msgFiche = Invoke-Installer @{ AnswerFile = $fiche }
-Assert-Equal $true  ($msgFiche -like '*Windows*')                          'fiche de reponses lue : le script atteint le controle de plateforme'
-Assert-Equal $false ($msgFiche -like "*Chemin d'installation invalide*")   'noms a espaces transmis sans deborder sur -InstallPath'
-Assert-Equal $false ($msgFiche -like '*Nom de compte invalide*')           'compte transmis sans apostrophes parasites'
-Assert-Equal $true  ((Invoke-Installer @{ AnswerFile = '/introuvable.json' }) -like '*introuvable*') 'fiche de reponses absente signalee'
+$sortie = ''
+try { $sortie = (& $installer -AnswerFile $fiche -ValidateOnly 2>&1 | Out-String) } catch { $sortie = $_.Exception.Message }
+$lu = $null
+try { $lu = ($sortie.Trim() | ConvertFrom-Json) } catch { }
+Assert-Equal $true ($null -ne $lu) 'fiche de reponses lue et parametres restitues'
+if ($null -ne $lu) {
+    Assert-Equal 'Malo'       $lu.NotifyUser                       'compte transmis sans apostrophes parasites'
+    Assert-Equal 2            @($lu.AllowedAdapterName).Count      'les DEUX noms de carte arrivent entiers'
+    Assert-Equal 'Ethernet 2' @($lu.AllowedAdapterName)[0]         'le nom a espace n est pas coupe'
+    Assert-Equal 'Wi-Fi'      @($lu.AllowedAdapterName)[1]         'le second nom de carte est intact'
+    Assert-Equal 'Ma Box 5G'  @($lu.AllowedSsid)[0]                'le SSID a espaces arrive entier'
+    Assert-Equal 2            @($lu.ExemptUsers).Count             'les comptes exemptes arrivent tous'
+    Assert-Equal $true        ($lu.InstallPath -notlike '*Wi-Fi*') 'aucun debordement vers -InstallPath'
+}
+Assert-Equal $true  ((Invoke-Installer @{ AnswerFile = '/introuvable.json'; ValidateOnly = $true }) -like '*introuvable*') 'fiche de reponses absente signalee'
 Remove-Item -LiteralPath $fiche -Force -ErrorAction SilentlyContinue
 $env:ProgramData = $pdSauve
 

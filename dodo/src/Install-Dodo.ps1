@@ -21,7 +21,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$InstallPath = (Join-Path $env:ProgramData 'Dodo'),
+    [string]$InstallPath = $(if ($env:ProgramData) { Join-Path $env:ProgramData 'Dodo' } else { 'C:\ProgramData\Dodo' }),
     [string]$AnswerFile,
     [switch]$Production,
     [string[]]$ExemptUsers,
@@ -30,7 +30,8 @@ param(
     [switch]$EnableAdapterGuard,
     [string[]]$AllowedAdapterName,
     [switch]$SkipCalendar,
-    [switch]$ResetConfig
+    [switch]$ResetConfig,
+    [switch]$ValidateOnly
 )
 
 Set-StrictMode -Version 2.0
@@ -93,6 +94,25 @@ if (-not [System.IO.Path]::IsPathRooted($InstallPath) -or $InstallPath -match '[
 }
 if ($NotifyUser -and $NotifyUser -match '[''"]') {
     throw ("Nom de compte invalide : {0}. Les apostrophes et guillemets ne sont pas acceptes." -f $NotifyUser)
+}
+
+# -ValidateOnly : on s'arrete ici en restituant les parametres tels qu'ils ont
+# ete compris, au format JSON. Permet de tester la transmission des reglages
+# sans rien installer, a l'identique sous Linux et sous Windows.
+if ($ValidateOnly) {
+    ([pscustomobject]@{
+        InstallPath        = $InstallPath
+        NotifyUser         = $NotifyUser
+        Production         = [bool]$Production
+        ExemptUsers        = @($ExemptUsers)
+        AllowedSsid        = @($AllowedSsid)
+        AllowedAdapterName = @($AllowedAdapterName)
+        EnableAdapterGuard = [bool]$EnableAdapterGuard
+        OfflineOnly        = $OfflineFromAnswer
+        HolidayCount       = @($HolidaysFromAnswer).Count
+        SchoolStart        = $(if ($null -ne $ScheduleFromAnswer) { [string]$ScheduleFromAnswer.school.start } else { '' })
+    } | ConvertTo-Json -Compress)
+    exit 0
 }
 
 . (Join-Path $PSScriptRoot 'DodoCore.ps1')
