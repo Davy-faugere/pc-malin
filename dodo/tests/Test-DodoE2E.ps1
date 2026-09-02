@@ -30,6 +30,10 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+# powershell.exe -File passe les arguments en chaines litterales : un
+# "-Phase a,b,c" arrive comme UN seul element. On renormalise donc ici.
+$Phase = @($Phase | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 . (Join-Path $srcDir 'DodoCore.ps1')
 . (Join-Path $srcDir 'DodoRuntime.ps1')

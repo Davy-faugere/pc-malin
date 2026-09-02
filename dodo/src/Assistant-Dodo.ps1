@@ -406,18 +406,25 @@ $btnGo.Add_Click({
     if ([System.Windows.Forms.MessageBox]::Show($recap + "`n`nInstaller avec ces réglages ?", 'Dodo - vérification',
         'YesNo', 'Question') -ne 'Yes') { return }
 
-    $a = @()
-    if ($rbProd.Checked) { $a += '-Production' }
-    $exempt = @($clAdults.CheckedItems | ForEach-Object { "'" + ([string]$_).Replace("'", "''") + "'" })
-    if ($exempt.Count -gt 0) { $a += '-ExemptUsers ' + ($exempt -join ',') }
-    $a += "-NotifyUser '" + $child.Replace("'", "''") + "'"
-    if ($chkNet.Checked) {
-        if ($hasWifi -and $ssid) { $a += "-AllowedSsid '" + $ssid.Replace("'", "''") + "'" }
-        $a += '-EnableAdapterGuard'
-        $a += '-AllowedAdapterName ' + (($cartes | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ',')
+    # Les reglages passent par un fichier, jamais par la ligne de commande :
+    # powershell.exe -File ne reinterprete pas les quotes PowerShell, et un
+    # nom de carte comme « Ethernet 2 » y serait decoupe en deux arguments.
+    $ans = [pscustomobject]@{
+        Production         = [bool]$rbProd.Checked
+        NotifyUser         = $child
+        ExemptUsers        = @($clAdults.CheckedItems | ForEach-Object { [string]$_ })
+        EnableAdapterGuard = [bool]$chkNet.Checked
+        AllowedSsid        = @()
+        AllowedAdapterName = @()
     }
+    if ($chkNet.Checked) {
+        if ($hasWifi -and $ssid) { $ans.AllowedSsid = @($ssid) }
+        $ans.AllowedAdapterName = @($cartes)
+    }
+    $ansFile = Join-Path $SETUP 'reponses.json'
+    [System.IO.File]::WriteAllText($ansFile, ($ans | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
 
-    $rc = Run-Script -File (Join-Path $SRC 'Install-Dodo.ps1') -Arguments ($a -join ' ') -Titre 'INSTALLATION'
+    $rc = Run-Script -File (Join-Path $SRC 'Install-Dodo.ps1') -Arguments ('-AnswerFile "{0}"' -f $ansFile) -Titre 'INSTALLATION'
     if ($rc -eq 0) {
         Log ''
         if ($rbProd.Checked) { Log "OK   Dodo est en service. Le poste s'éteindra aux horaires prévus." $C_OK }

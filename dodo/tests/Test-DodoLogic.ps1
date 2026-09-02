@@ -259,6 +259,49 @@ $st = Get-DodoState ([datetime]'2026-10-20 22:00') $cfg $periodsList $true
 Assert-Equal 'Allowed' $st.State 'Get-DodoState accepte une List[object] de periodes'
 
 # --------------------------------------------------------------------------
+Write-Section 'Non-regression : transmission des reglages a l installateur'
+# powershell.exe -File ne reinterprete pas les quotes PowerShell. En production,
+# "-AllowedAdapterName 'Ethernet 2','Wi-Fi'" etait decoupe sur l'espace et le
+# jeton "2','Wi-Fi'" se liait au premier parametre POSITIONNEL, -InstallPath :
+# l'installation partait dans un dossier nomme 2','Wi-Fi'. Meme cause pour
+# "-NotifyUser 'Malo'", dont les apostrophes cassaient la resolution du compte.
+$srcDir    = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
+$installer = Join-Path $srcDir 'Install-Dodo.ps1'
+$pdSauve = $env:ProgramData
+if ([string]::IsNullOrEmpty($env:ProgramData)) { $env:ProgramData = [System.IO.Path]::GetTempPath() }
+
+function Invoke-Installer {
+    param([hashtable]$Parametres)
+    try { & $installer @Parametres | Out-Null; return '' }
+    catch { return $_.Exception.Message }
+}
+
+Assert-Equal $true ((Invoke-Installer @{ InstallPath = "2','Wi-Fi'" }) -like "*Chemin d'installation invalide*") 'chemin issu d un debordement de parametre refuse'
+Assert-Equal $true ((Invoke-Installer @{ InstallPath = 'dodo' })       -like "*Chemin d'installation invalide*") 'chemin relatif refuse'
+Assert-Equal $true ((Invoke-Installer @{ InstallPath = ([System.IO.Path]::GetTempPath() + 'D'); NotifyUser = "'Malo'" }) -like '*Nom de compte invalide*') 'compte porteur d apostrophes refuse'
+
+# Chemin nominal : une fiche de reponses contenant justement des valeurs a
+# espaces doit etre lue sans encombre, jusqu'au controle de plateforme.
+$fiche = Join-Path ([System.IO.Path]::GetTempPath()) 'dodo-reponses-test.json'
+$reponses = [pscustomobject]@{
+    InstallPath        = (Join-Path ([System.IO.Path]::GetTempPath()) 'DodoTest')
+    NotifyUser         = 'Malo'
+    ExemptUsers        = @('Papa', 'Maman')
+    AllowedSsid        = @('Ma Box 5G')
+    AllowedAdapterName = @('Ethernet 2', 'Wi-Fi')
+    EnableAdapterGuard = $true
+    Production         = $false
+}
+[System.IO.File]::WriteAllText($fiche, ($reponses | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+$msgFiche = Invoke-Installer @{ AnswerFile = $fiche }
+Assert-Equal $true  ($msgFiche -like '*Windows*')                          'fiche de reponses lue : le script atteint le controle de plateforme'
+Assert-Equal $false ($msgFiche -like "*Chemin d'installation invalide*")   'noms a espaces transmis sans deborder sur -InstallPath'
+Assert-Equal $false ($msgFiche -like '*Nom de compte invalide*')           'compte transmis sans apostrophes parasites'
+Assert-Equal $true  ((Invoke-Installer @{ AnswerFile = '/introuvable.json' }) -like '*introuvable*') 'fiche de reponses absente signalee'
+Remove-Item -LiteralPath $fiche -Force -ErrorAction SilentlyContinue
+$env:ProgramData = $pdSauve
+
+# --------------------------------------------------------------------------
 Write-Section 'Purete ASCII des sources (accents interdits hors messages JSON)'
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 # Regle : un .ps1 est soit en ASCII pur, soit en UTF-8 AVEC BOM. Sans BOM,

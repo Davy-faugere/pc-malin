@@ -22,6 +22,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallPath = (Join-Path $env:ProgramData 'Dodo'),
+    [string]$AnswerFile,
     [switch]$Production,
     [string[]]$ExemptUsers,
     [string]$NotifyUser,
@@ -34,6 +35,56 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+# --------------------------------------------------------------------------
+# Fiche de reponses.
+#
+# powershell.exe -File NE REINTERPRETE PAS les quotes PowerShell : les
+# arguments qui suivent le script sont decoupes sur les espaces par le
+# runtime C. "-AllowedAdapterName 'Ethernet 2','Wi-Fi'" devenait donc deux
+# jetons, et le second ("2','Wi-Fi'") se liait au premier parametre
+# POSITIONNEL, c'est-a-dire -InstallPath. De meme "-NotifyUser 'Malo'"
+# arrivait avec ses apostrophes, d'ou l'echec de resolution du compte.
+#
+# Aucun tableau ni aucune valeur a espaces ne passe donc plus par la ligne
+# de commande : l'appelant depose un JSON, on le relit ici.
+# --------------------------------------------------------------------------
+if ($AnswerFile) {
+    if (-not (Test-Path -LiteralPath $AnswerFile)) { throw "Fiche de reponses introuvable : $AnswerFile" }
+    $ans = ([System.IO.File]::ReadAllText($AnswerFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json)
+
+    if ($ans.PSObject.Properties['InstallPath'] -and $ans.InstallPath) { $InstallPath = [string]$ans.InstallPath }
+    if ($ans.PSObject.Properties['NotifyUser']  -and $ans.NotifyUser)  { $NotifyUser  = [string]$ans.NotifyUser }
+    if ($ans.PSObject.Properties['Production']         -and [bool]$ans.Production)         { $Production = $true }
+    if ($ans.PSObject.Properties['EnableAdapterGuard'] -and [bool]$ans.EnableAdapterGuard) { $EnableAdapterGuard = $true }
+    if ($ans.PSObject.Properties['SkipCalendar']       -and [bool]$ans.SkipCalendar)       { $SkipCalendar = $true }
+    if ($ans.PSObject.Properties['ResetConfig']        -and [bool]$ans.ResetConfig)        { $ResetConfig = $true }
+
+    # ExemptUsers s'applique meme vide : c'est ainsi qu'on vide la liste.
+    if ($ans.PSObject.Properties['ExemptUsers']) {
+        $ExemptUsers = [string[]]@($ans.ExemptUsers)
+        $PSBoundParameters['ExemptUsers'] = $ExemptUsers
+    }
+    # Ces deux-la, en revanche, ne s'appliquent que non vides : une liste vide
+    # de SSID poserait un denyall sans aucune autorisation, coupant tout le Wi-Fi.
+    if ($ans.PSObject.Properties['AllowedSsid'] -and @($ans.AllowedSsid).Count -gt 0) {
+        $AllowedSsid = [string[]]@($ans.AllowedSsid)
+        $PSBoundParameters['AllowedSsid'] = $AllowedSsid
+    }
+    if ($ans.PSObject.Properties['AllowedAdapterName'] -and @($ans.AllowedAdapterName).Count -gt 0) {
+        $AllowedAdapterName = [string[]]@($ans.AllowedAdapterName)
+        $PSBoundParameters['AllowedAdapterName'] = $AllowedAdapterName
+    }
+}
+
+# Garde-fou : un chemin relatif ou porteur de quotes est le symptome d'un
+# debordement de parametre. Mieux vaut refuser bruyamment qu'installer ailleurs.
+if (-not [System.IO.Path]::IsPathRooted($InstallPath) -or $InstallPath -match '[''"|<>*?]') {
+    throw ("Chemin d'installation invalide : '{0}'. Un chemin absolu est attendu, par exemple C:\ProgramData\Dodo." -f $InstallPath)
+}
+if ($NotifyUser -and $NotifyUser -match '[''"]') {
+    throw ("Nom de compte invalide : {0}. Les apostrophes et guillemets ne sont pas acceptes." -f $NotifyUser)
+}
 
 . (Join-Path $PSScriptRoot 'DodoCore.ps1')
 . (Join-Path $PSScriptRoot 'DodoRuntime.ps1')
@@ -462,6 +513,13 @@ foreach ($n in @('Dodo-Enforce', 'Dodo-Boot', 'Dodo-Notify')) {
         elseif ($n -eq 'Dodo-Boot')  { Ok "$n : etat=$($t.State) declencheur=au demarrage" }
         elseif ($rep -ne 'PT1M')     { Warn "$n : repetition = $rep (attendu PT1M) - le test bout-en-bout le confirmera"; $allGood = $false }
         else                          { Ok "$n : etat=$($t.State) repetition=$rep principal=$($t.Principal.UserId)$($t.Principal.GroupId)" }
+        foreach ($ac in @($t.Actions)) {
+            $arg = [string]$ac.Arguments
+            if ($arg -and $arg -notmatch [regex]::Escape($paths.Bin)) {
+                Warn "$n pointe hors de l'installation : $arg"
+                $allGood = $false
+            }
+        }
     }
     catch { if ($n -eq 'Dodo-Boot') { Warn "$n absente (non bloquant)" } else { Warn "$n introuvable"; $allGood = $false } }
 }
