@@ -6,6 +6,11 @@ on:
   push:
     tags: ['dodo-v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag de la pre-release (ex. dodo-v1.3.0-rc1)"
+        required: true
+        default: "dodo-v1.3.0-rc1"
 
 permissions:
   contents: write
@@ -41,7 +46,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
-          name: "Dodo ${{ github.ref_name }}"
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: "Dodo ${{ github.event.inputs.tag || github.ref_name }}"
           files: |
             dist/Dodo-Installateur.exe
             dist/Dodo-Installateur.cmd
