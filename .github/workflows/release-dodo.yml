@@ -4,7 +4,13 @@ name: Release Dodo
 # de PC Malin qui repondent aux tags v*.
 on:
   push:
+    # Tag classique quand on peut en pousser un.
     tags: ['dodo-v*']
+    # Branche de declenchement : les identifiants d'une session agent sont
+    # limites a refs/heads/*, un push de tag y est refuse en 403. Pousser
+    # release/dodo-vX.Y.Z declenche donc la construction, et c'est l'Action
+    # qui cree le tag avec GITHUB_TOKEN. La branche est supprimee a la fin.
+    branches: ['release/dodo-v*']
   workflow_dispatch:
     inputs:
       tag:
@@ -20,6 +26,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Determiner le tag de la release
+        id: tag
+        run: |
+          NAME="${{ github.event.inputs.tag }}"
+          if [ -z "$NAME" ]; then
+            case "$GITHUB_REF" in
+              refs/tags/*)            NAME="${GITHUB_REF#refs/tags/}" ;;
+              refs/heads/release/*)   NAME="${GITHUB_REF#refs/heads/release/}" ;;
+              *)                      echo "Reference inattendue : $GITHUB_REF" >&2 ; exit 1 ;;
+            esac
+          fi
+          case "$NAME" in
+            dodo-v*) ;;
+            *) echo "Nom de tag invalide : '$NAME' (attendu dodo-v*)" >&2 ; exit 1 ;;
+          esac
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Tag retenu : $NAME"
 
       - name: Installer mono (compilation de l'exe)
         run: sudo apt-get update && sudo apt-get install -y mono-mcs mono-devel
@@ -46,9 +70,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ steps.tag.outputs.name }}
           target_commitish: ${{ github.sha }}
-          name: "Dodo ${{ github.event.inputs.tag || github.ref_name }}"
+          name: "Dodo ${{ steps.tag.outputs.name }}"
           files: |
             dist/Dodo-Installateur.exe
             dist/Dodo-Installateur.cmd
@@ -82,3 +106,8 @@ jobs:
             ### Pré-release
             Version de validation : à éprouver sur un PC d'essai avant déploiement.
             Documentation : [`dodo/README.md`](https://github.com/Davy-faugere/pc-malin/blob/main/dodo/README.md)
+
+      - name: Retirer la branche de declenchement
+        if: startsWith(github.ref, 'refs/heads/release/')
+        continue-on-error: true
+        run: git push origin --delete "${GITHUB_REF#refs/heads/}"
