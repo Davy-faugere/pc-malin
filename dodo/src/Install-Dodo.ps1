@@ -299,20 +299,10 @@ $o2 = & icacls.exe $paths.Root /inheritance:r /C 2>&1
 if ($LASTEXITCODE -ne 0) { Warn "icacls /inheritance a signale un probleme : $($o2 -join ' ')" }
 
 # Verification effective plutot que declarative
-$usersSid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
 $writable = @()
 foreach ($d in @($paths.Bin, $paths.Etc, $paths.Var, $paths.Logs)) {
     try {
-        foreach ($ace in (Get-Acl -LiteralPath $d).Access) {
-            if ($ace.AccessControlType -ne 'Allow') { continue }
-            $sid = $null
-            try { $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) } catch { }
-            if ($null -eq $sid -or $sid -ne $usersSid) { continue }
-            if (($ace.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Write) -ne 0 -or
-                ($ace.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify) -ne 0) {
-                $writable += (Split-Path -Leaf $d)
-            }
-        }
+        if ((Get-DodoUserWriteRights -Path $d).Count -gt 0) { $writable += (Split-Path -Leaf $d) }
     }
     catch { Warn "ACL de $d illisible : $($_.Exception.Message)" }
 }

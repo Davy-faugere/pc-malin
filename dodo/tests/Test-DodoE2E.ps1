@@ -160,21 +160,9 @@ if (& $want 'calendar') {
 # ==========================================================================
 if (& $want 'security') {
     Sec 'PHASE 4 - Resistance a la manipulation'
-    $usersSid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
     foreach ($d in @($paths.Bin, $paths.Etc, $paths.Var)) {
         $bad = @()
-        try {
-            foreach ($ace in (Get-Acl -LiteralPath $d).Access) {
-                $sid = $null
-                try { $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) } catch { }
-                if ($null -eq $sid -or $sid -ne $usersSid) { continue }
-                if ($ace.AccessControlType -ne 'Allow') { continue }
-                if (($ace.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Write) -ne 0 -or
-                    ($ace.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify) -ne 0) {
-                    $bad += "$($ace.FileSystemRights)"
-                }
-            }
-        }
+        try { $bad = @(Get-DodoUserWriteRights -Path $d) }
         catch { $bad += "ACL illisible : $($_.Exception.Message)" }
         Chk ($bad.Count -eq 0) "le groupe Utilisateurs ne peut pas ecrire dans $(Split-Path -Leaf $d)" ($bad -join ', ')
     }

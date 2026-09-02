@@ -34,8 +34,18 @@ try {
 }
 catch { }
 
-# 2. Extinction eventuellement engagee
-try { Start-Process -FilePath 'shutdown.exe' -ArgumentList @('/a') -NoNewWindow -Wait -ErrorAction SilentlyContinue | Out-Null } catch { }
+# 2. Extinction eventuellement engagee.
+#    Sans extinction en cours, shutdown /a ecrit sur la sortie d'erreur
+#    ("no shutdown was in progress", code 1116). C'est le cas NORMAL : on
+#    redirige, sinon l'appelant croit a un echec de la desinstallation.
+$errTmp = [System.IO.Path]::GetTempFileName()
+try {
+    $sp = Start-Process -FilePath 'shutdown.exe' -ArgumentList @('/a') -NoNewWindow -Wait -PassThru `
+                        -RedirectStandardError $errTmp -ErrorAction SilentlyContinue
+    if ($null -ne $sp -and $sp.ExitCode -eq 0) { Ok 'extinction en cours annulee' }
+}
+catch { }
+finally { Remove-Item -LiteralPath $errTmp -Force -ErrorAction SilentlyContinue }
 
 # 3. Regles reseau
 if (-not $KeepNetworkRules) {

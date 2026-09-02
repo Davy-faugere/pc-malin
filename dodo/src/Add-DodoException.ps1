@@ -50,11 +50,15 @@ if ($PSCmdlet.ParameterSetName -eq 'Until') {
 else { $target = (Get-Date).AddMinutes($Minutes) }
 
 # 1. Annuler une extinction deja engagee (sans echouer s'il n'y en a pas)
+$errTmp = [System.IO.Path]::GetTempFileName()
 try {
-    $p = Start-Process -FilePath 'shutdown.exe' -ArgumentList @('/a') -NoNewWindow -Wait -PassThru -ErrorAction Stop
+    # Code 1116 sans extinction en cours : cas normal, on ne l'affiche pas.
+    $p = Start-Process -FilePath 'shutdown.exe' -ArgumentList @('/a') -NoNewWindow -Wait -PassThru `
+                       -RedirectStandardError $errTmp -ErrorAction Stop
     if ($p.ExitCode -eq 0) { Write-Host 'Extinction en cours annulee.' -ForegroundColor Green }
 }
 catch { }
+finally { Remove-Item -LiteralPath $errTmp -Force -ErrorAction SilentlyContinue }
 if (Test-Path -LiteralPath $paths.Pending) { Remove-Item -LiteralPath $paths.Pending -Force -ErrorAction SilentlyContinue }
 
 # 2. Poser la derogation

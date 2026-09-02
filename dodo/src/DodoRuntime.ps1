@@ -383,6 +383,36 @@ function Get-DodoCalendar {
 # Sessions interactives (Windows)
 # --------------------------------------------------------------------------
 
+function Get-DodoUserWriteRights {
+    <#
+        Droits d'ECRITURE effectifs du groupe Utilisateurs sur un dossier.
+        Renvoie la liste des droits trouves, vide si le groupe est en lecture
+        seule.
+
+        On teste des bits ELEMENTAIRES, jamais les masques composites
+        ReadAndExecute / Modify / FullControl : Modify contient deja les bits
+        de lecture, donc "-band Modify" est vrai pour une simple ACE de
+        lecture. C'est ce faux positif qui faisait echouer le controle alors
+        que les droits poses etaient corrects.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $sidUsers = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
+    $R = [System.Security.AccessControl.FileSystemRights]
+    $masque = [int]($R::WriteData -bor $R::AppendData -bor $R::WriteAttributes -bor
+                    $R::WriteExtendedAttributes -bor $R::Delete -bor
+                    $R::DeleteSubdirectoriesAndFiles -bor $R::ChangePermissions -bor $R::TakeOwnership)
+    $trouves = New-Object System.Collections.Generic.List[string]
+    foreach ($ace in (Get-Acl -LiteralPath $Path).Access) {
+        if ($ace.AccessControlType -ne 'Allow') { continue }
+        $sid = $null
+        try { $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) } catch { }
+        if ($null -eq $sid -or $sid -ne $sidUsers) { continue }
+        $eff = [int]$ace.FileSystemRights -band $masque
+        if ($eff -ne 0) { $trouves.Add(([System.Security.AccessControl.FileSystemRights]$eff).ToString()) }
+    }
+    return ,$trouves.ToArray()
+}
+
 function Get-DodoInteractiveUsers {
     <#
         Comptes ayant une session graphique ouverte, deduits des processus

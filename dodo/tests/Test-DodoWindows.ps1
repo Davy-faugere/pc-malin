@@ -35,6 +35,24 @@ function Chk { param([bool]$C, [string]$L, [string]$D = '')
     else { $script:Fail++; $script:Failures.Add("$L $D"); Write-Host "  [FAIL] $L  $D" -ForegroundColor Red } }
 function Note { param($T) Write-Host "         $T" -ForegroundColor DarkGray }
 
+function Invoke-Ps {
+    <#
+        Lance un script dans un powershell.exe fils et rend code + sortie.
+        Sans cette precaution, la moindre ligne ecrite sur la sortie d'erreur
+        par un utilitaire natif (shutdown /a quand aucune extinction n'est en
+        cours, par exemple) devient une erreur terminante chez l'appelant a
+        cause de $ErrorActionPreference = 'Stop'.
+    #>
+    param([string]$Script, [string[]]$Arguments = @())
+    $ancien = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $sortie = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script @Arguments 2>&1
+        return [pscustomobject]@{ Code = $LASTEXITCODE; Lignes = @($sortie | ForEach-Object { [string]$_ }) }
+    }
+    finally { $ErrorActionPreference = $ancien }
+}
+
 $paths = Get-DodoPaths -Root $Root
 
 Write-Host ''
@@ -80,10 +98,9 @@ $reponses = [pscustomobject]@{
 
 $installe = $false
 try {
-    $sortie = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $srcDir 'Install-Dodo.ps1') -AnswerFile $fiche 2>&1
-    $code = $LASTEXITCODE
-    foreach ($l in @($sortie)) { Note $l }
-    Chk ($code -eq 0 -or $null -eq $code) "Install-Dodo.ps1 se termine sans erreur (code $code)"
+    $r = Invoke-Ps -Script (Join-Path $srcDir 'Install-Dodo.ps1') -Arguments @('-AnswerFile', $fiche)
+    foreach ($l in $r.Lignes) { Note $l }
+    Chk ($r.Code -eq 0 -or $null -eq $r.Code) "Install-Dodo.ps1 se termine sans erreur (code $($r.Code))"
     $installe = $true
 }
 catch { Chk $false 'Install-Dodo.ps1 se termine sans erreur' $_.Exception.Message }
@@ -111,23 +128,17 @@ try {
     # ======================================================================
     Sec 'PHASE 4 - Droits NTFS'
     # Couvre l'ordre icacls : /inheritance:r avant /grant vidait la racine.
-    $sidUsers = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
+    # Bits d'ecriture elementaires uniquement : Modify est un masque composite
+    # qui contient deja la lecture, un -band avec lui est toujours vrai.
     foreach ($d in @($paths.Bin, $paths.Etc, $paths.Var)) {
         $ecrivables = @()
-        foreach ($ace in (Get-Acl -LiteralPath $d).Access) {
-            if ($ace.AccessControlType -ne 'Allow') { continue }
-            $sid = $null
-            try { $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) } catch { }
-            if ($null -eq $sid -or $sid -ne $sidUsers) { continue }
-            if (($ace.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Write) -ne 0 -or
-                ($ace.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify) -ne 0) {
-                $ecrivables += [string]$ace.FileSystemRights
-            }
-        }
+        try { $ecrivables = @(Get-DodoUserWriteRights -Path $d) }
+        catch { $ecrivables += "ACL illisible : $($_.Exception.Message)" }
         Chk ($ecrivables.Count -eq 0) "groupe Utilisateurs sans ecriture sur $(Split-Path -Leaf $d)" ($ecrivables -join ', ')
+        $sidU = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')
         $lecture = @((Get-Acl -LiteralPath $d).Access | Where-Object {
-            $s = $null; try { $s = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) } catch { }
-            $s -eq $sidUsers -and $_.AccessControlType -eq 'Allow' })
+            $x = $null; try { $x = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) } catch { }
+            $x -eq $sidU -and $_.AccessControlType -eq 'Allow' })
         Chk ($lecture.Count -gt 0) "groupe Utilisateurs en lecture sur $(Split-Path -Leaf $d)"
     }
 
@@ -157,17 +168,20 @@ try {
 
     # ======================================================================
     Sec 'PHASE 6 - Execution reelle des agents'
-    $sortieE = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $paths.Bin 'Invoke-DodoEnforce.ps1') 2>&1
-    Chk ($LASTEXITCODE -eq 0) "Invoke-DodoEnforce.ps1 se termine en code 0 (obtenu $LASTEXITCODE)" ($sortieE -join ' ')
     $journal = Join-Path $paths.Logs ('dodo-{0}.log' -f (Get-Date).ToString('yyyyMMdd'))
-    Chk (Test-Path -LiteralPath $journal) 'journal ecrit par l agent SYSTEM'
+    $rE = Invoke-Ps -Script (Join-Path $paths.Bin 'Invoke-DodoEnforce.ps1')
+    Chk ($rE.Code -eq 0) "Invoke-DodoEnforce.ps1 se termine en code 0 (obtenu $($rE.Code))" ($rE.Lignes -join ' ')
+    # Hors fenetre d'extinction l'agent n'a rien a dire : le silence est le
+    # comportement attendu, un journal vide n'est donc pas un defaut. Sa
+    # presence est verifiee en phase 7, quand un evenement se produit.
 
-    $sortieD = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $paths.Bin 'Show-DodoWarning.ps1') -Diagnose 2>&1
-    Chk ($LASTEXITCODE -eq 0) "Show-DodoWarning.ps1 -Diagnose se termine en code 0 (obtenu $LASTEXITCODE)"
-    foreach ($l in @($sortieD)) { Note $l }
+    $rD = Invoke-Ps -Script (Join-Path $paths.Bin 'Show-DodoWarning.ps1') -Arguments @('-Diagnose')
+    Chk ($rD.Code -eq 0) "Show-DodoWarning.ps1 -Diagnose se termine en code 0 (obtenu $($rD.Code))"
+    foreach ($l in $rD.Lignes) { Note $l }
+    Chk (@($rD.Lignes | Where-Object { $_ -match 'Racine resolue' }).Count -gt 0) 'le diagnostic restitue bien son etat'
 
-    $sortieS = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $paths.Bin 'Get-DodoStatus.ps1') -Nights 3 2>&1
-    Chk ($LASTEXITCODE -eq 0) "Get-DodoStatus.ps1 se termine en code 0 (obtenu $LASTEXITCODE)"
+    $rS = Invoke-Ps -Script (Join-Path $paths.Bin 'Get-DodoStatus.ps1') -Arguments @('-Nights', '3')
+    Chk ($rS.Code -eq 0) "Get-DodoStatus.ps1 se termine en code 0 (obtenu $($rS.Code))"
 
     # ======================================================================
     Sec 'PHASE 7 - Soiree simulee via la fenetre d essai'
@@ -177,17 +191,38 @@ try {
         start = $depart.ToString('s'); end = $depart.AddMinutes(5).ToString('s'); label = 'recette windows' }) -Force
     Write-DodoJson -Path $paths.Config -Object $raw
     Write-DodoText -Path $paths.ClockOffset -Content '60'
+
+    function Get-NouvellesLignes {
+        param([int]$Depuis)
+        $t = @(Get-Content -LiteralPath $journal -ErrorAction SilentlyContinue)
+        if ($t.Count -le $Depuis) { return @() }
+        return @($t[$Depuis..($t.Count - 1)])
+    }
+
+    # 7a. Le compte courant est dans exemptUsers et a une session ouverte :
+    #     l'agent doit refuser d'eteindre. C'est le mecanisme d'exemption.
     if (Test-Path -LiteralPath $paths.Pending) { Remove-Item -LiteralPath $paths.Pending -Force }
-    $avant = @(Get-Content -LiteralPath $journal -ErrorAction SilentlyContinue).Count
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $paths.Bin 'Invoke-DodoEnforce.ps1') | Out-Null
-    $apres = @(Get-Content -LiteralPath $journal -ErrorAction SilentlyContinue)
-    $nouvelles = @()
-    if ($apres.Count -gt $avant) { $nouvelles = @($apres[$avant..($apres.Count - 1)]) }
-    foreach ($l in $nouvelles) { Note $l }
-    Chk (@($nouvelles | Where-Object { $_ -match 'SIMULATION : extinction' }).Count -gt 0) 'extinction journalisee en simulation, sans extinction reelle'
-    Remove-Item -LiteralPath $paths.ClockOffset -Force -ErrorAction SilentlyContinue
+    $n0 = @(Get-Content -LiteralPath $journal -ErrorAction SilentlyContinue).Count
+    Invoke-Ps -Script (Join-Path $paths.Bin 'Invoke-DodoEnforce.ps1') | Out-Null
+    $l1 = Get-NouvellesLignes -Depuis $n0
+    foreach ($l in $l1) { Note $l }
+    Chk (@($l1 | Where-Object { $_ -match 'Extinction suspendue' }).Count -gt 0) 'compte exempte connecte : extinction refusee'
+
+    # 7b. Sans compte exempte, la meme fenetre doit journaliser l'extinction.
     $raw2 = Read-DodoJson -Path $paths.Config
-    if ($null -ne $raw2.PSObject.Properties['testWindow']) { $raw2.PSObject.Properties.Remove('testWindow'); Write-DodoJson -Path $paths.Config -Object $raw2 }
+    $raw2 | Add-Member -NotePropertyName 'exemptUsers' -NotePropertyValue @() -Force
+    Write-DodoJson -Path $paths.Config -Object $raw2
+    if (Test-Path -LiteralPath $paths.Pending) { Remove-Item -LiteralPath $paths.Pending -Force }
+    $n1 = @(Get-Content -LiteralPath $journal -ErrorAction SilentlyContinue).Count
+    Invoke-Ps -Script (Join-Path $paths.Bin 'Invoke-DodoEnforce.ps1') | Out-Null
+    $l2 = Get-NouvellesLignes -Depuis $n1
+    foreach ($l in $l2) { Note $l }
+    Chk (@($l2 | Where-Object { $_ -match 'SIMULATION : extinction' }).Count -gt 0) 'extinction journalisee en simulation, sans extinction reelle'
+    Chk (Test-Path -LiteralPath $journal) 'journal ecrit par l agent SYSTEM'
+
+    Remove-Item -LiteralPath $paths.ClockOffset -Force -ErrorAction SilentlyContinue
+    $raw3 = Read-DodoJson -Path $paths.Config
+    if ($null -ne $raw3.PSObject.Properties['testWindow']) { $raw3.PSObject.Properties.Remove('testWindow'); Write-DodoJson -Path $paths.Config -Object $raw3 }
 
     # ======================================================================
     if (-not $SkipTaskWait) {
@@ -204,8 +239,9 @@ finally {
     # ======================================================================
     Sec 'PHASE 9 - Desinstallation et retour a l etat initial'
     if ($installe) {
-        $sortieU = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $paths.Bin 'Uninstall-Dodo.ps1') 2>&1
-        foreach ($l in @($sortieU)) { Note $l }
+        $rU = Invoke-Ps -Script (Join-Path $paths.Bin 'Uninstall-Dodo.ps1')
+        foreach ($l in $rU.Lignes) { Note $l }
+        Chk (@($rU.Lignes | Where-Object { $_ -match 'no shutdown was in progress|1116' }).Count -eq 0) 'la desinstallation ne remonte pas d erreur parasite de shutdown'
         $restantes = @()
         foreach ($n in @('Dodo-Enforce', 'Dodo-Boot', 'Dodo-Notify')) {
             try { $null = Get-ScheduledTask -TaskPath '\Dodo\' -TaskName $n -ErrorAction Stop; $restantes += $n } catch { }
