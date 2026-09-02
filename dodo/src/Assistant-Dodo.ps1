@@ -107,9 +107,22 @@ function Get-Ssids {
     }
     return ,$l.ToArray()
 }
+# Cartes typiquement utilisees pour partager la connexion d'un telephone :
+# elles sont decochees d'office : les autoriser viderait la mesure de son sens.
+$PARTAGE = 'Bluetooth|Personal Area|RNDIS|Remote NDIS|Tethering|iPhone|Android'
+
 function Get-Adapters {
-    try { return @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.Status -ne 'Disabled' } |
-                   Sort-Object Name | ForEach-Object { '{0}  -  {1}' -f $_.Name, $_.InterfaceDescription }) }
+    try {
+        return @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.Status -ne 'Disabled' } |
+                 Sort-Object Name | ForEach-Object {
+                     $partage = ($_.Name -match $PARTAGE -or $_.InterfaceDescription -match $PARTAGE)
+                     [pscustomobject]@{
+                         Nom     = $_.Name
+                         Libelle = '{0}  -  {1}{2}' -f $_.Name, $_.InterfaceDescription, $(if ($partage) { '   [voie de partage]' } else { '' })
+                         Partage = $partage
+                     }
+                 })
+    }
     catch { return @() }
 }
 function Test-HasWifi {
@@ -204,11 +217,18 @@ $g3.Controls.Add($cbSsid)
 $btnSsid = New-Object System.Windows.Forms.Button
 $btnSsid.Text = 'Détecter'; $btnSsid.SetBounds(450, 48, 80, 26); $g3.Controls.Add($btnSsid)
 
-$lstAd = New-Object System.Windows.Forms.ListBox
-$lstAd.SetBounds(16, 80, 708, 48)
+$lstAd = New-Object System.Windows.Forms.CheckedListBox
+$lstAd.SetBounds(16, 78, 708, 52)
 $lstAd.Font = New-Object System.Drawing.Font('Segoe UI', 8)
-foreach ($a in (Get-Adapters)) { [void]$lstAd.Items.Add($a) }
+$lstAd.CheckOnClick = $true
 $g3.Controls.Add($lstAd)
+
+function Fill-Adapters {
+    $lstAd.Items.Clear()
+    $script:AdapterRows = @(Get-Adapters)
+    foreach ($a in $script:AdapterRows) { [void]$lstAd.Items.Add($a.Libelle, (-not $a.Partage)) }
+}
+Fill-Adapters
 
 # --- 4. mode
 $g4 = New-Group '4.  Mode' 452 76
@@ -291,8 +311,7 @@ $btnSsid.Add_Click({
     $cbSsid.Items.Clear()
     foreach ($s in (Get-Ssids)) { [void]$cbSsid.Items.Add($s) }
     if ($cbSsid.Items.Count -gt 0) { $cbSsid.SelectedIndex = 0 }
-    $lstAd.Items.Clear()
-    foreach ($a in (Get-Adapters)) { [void]$lstAd.Items.Add($a) }
+    Fill-Adapters
     Log "OK   $($cbSsid.Items.Count) réseau(x) et $($lstAd.Items.Count) carte(s) détecté(s)."
 })
 
@@ -355,13 +374,37 @@ $btnGo.Add_Click({
             'Dodo', 'OK', 'Warning') | Out-Null
         return
     }
-    if ($chkNet.Checked) {
-        $r = [System.Windows.Forms.MessageBox]::Show(
-            "Les cartes réseau présentes maintenant seront autorisées définitivement ; toute carte " +
-            "apparaissant ensuite (téléphone en partage USB, clé 4G) sera désactivée.`n`n" +
-            "Le téléphone est-il bien DÉBRANCHÉ de ce PC ?", 'Dodo', 'YesNo', 'Question')
-        if ($r -ne 'Yes') { return }
+    $cartes = @()
+    for ($i = 0; $i -lt $lstAd.Items.Count; $i++) {
+        if ($lstAd.GetItemChecked($i)) { $cartes += $script:AdapterRows[$i].Nom }
     }
+    if ($chkNet.Checked -and $cartes.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Aucune carte réseau n'est cochée : le poste serait coupé de tout réseau.`n`n" +
+            "Cochez au moins la carte que l'enfant doit pouvoir utiliser.", 'Dodo', 'OK', 'Warning') | Out-Null
+        return
+    }
+
+    # Récapitulatif : c'est ici qu'on rattrape un mauvais Wi-Fi (un réseau
+    # d'entreprise détecté au lieu de celui de la maison, par exemple).
+    $recap = "Compte de l'enfant : $child`n"
+    $ex = @($clAdults.CheckedItems | ForEach-Object { [string]$_ })
+    $recap += "Adultes exemptés   : " + $(if ($ex.Count) { $ex -join ', ' } else { 'aucun' }) + "`n"
+    $recap += "Mode               : " + $(if ($rbProd.Checked) { 'MISE EN SERVICE - extinction réelle' } else { 'simulation - rien ne s''éteint' }) + "`n`n"
+    if ($chkNet.Checked) {
+        if ($hasWifi) { $recap += "Seul Wi-Fi autorisé : $ssid`n" }
+        $recap += "Cartes autorisées  : " + ($cartes -join ', ') + "`n"
+        $bloquees = @()
+        for ($i = 0; $i -lt $lstAd.Items.Count; $i++) { if (-not $lstAd.GetItemChecked($i)) { $bloquees += $script:AdapterRows[$i].Nom } }
+        if ($bloquees.Count) { $recap += "Cartes bloquées    : " + ($bloquees -join ', ') + "`n" }
+        $recap += "`nVérifiez le nom du Wi-Fi : si ce n'est pas celui de VOTRE maison, "
+        $recap += "le portable ne pourra plus se connecter chez vous.`n"
+        $recap += "Le téléphone est-il bien DÉBRANCHÉ de ce PC ?"
+    }
+    else { $recap += "Blocage du partage de connexion : désactivé." }
+
+    if ([System.Windows.Forms.MessageBox]::Show($recap + "`n`nInstaller avec ces réglages ?", 'Dodo - vérification',
+        'YesNo', 'Question') -ne 'Yes') { return }
 
     $a = @()
     if ($rbProd.Checked) { $a += '-Production' }
@@ -371,6 +414,7 @@ $btnGo.Add_Click({
     if ($chkNet.Checked) {
         if ($hasWifi -and $ssid) { $a += "-AllowedSsid '" + $ssid.Replace("'", "''") + "'" }
         $a += '-EnableAdapterGuard'
+        $a += '-AllowedAdapterName ' + (($cartes | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ',')
     }
 
     $rc = Run-Script -File (Join-Path $SRC 'Install-Dodo.ps1') -Arguments ($a -join ' ') -Titre 'INSTALLATION'

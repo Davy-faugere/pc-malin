@@ -105,7 +105,7 @@ for ($i = 0; $i -lt $Nights; $i++) {
 
 if ($isWindows5) {
     Head 'Taches planifiees'
-    foreach ($t in @('Dodo-Enforce', 'Dodo-Notify')) {
+    foreach ($t in @('Dodo-Enforce', 'Dodo-Boot', 'Dodo-Notify')) {
         try {
             $task = Get-ScheduledTask -TaskPath '\Dodo\' -TaskName $t -ErrorAction Stop
             $info = Get-ScheduledTaskInfo -InputObject $task

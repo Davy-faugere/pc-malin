@@ -27,6 +27,7 @@ param(
     [string]$NotifyUser,
     [string[]]$AllowedSsid,
     [switch]$EnableAdapterGuard,
+    [string[]]$AllowedAdapterName,
     [switch]$SkipCalendar,
     [switch]$ResetConfig
 )
@@ -117,15 +118,35 @@ if ($PSBoundParameters.ContainsKey('AllowedSsid')) {
     Set-Prop $w 'allowedSsids' @($AllowedSsid)
 }
 if ($EnableAdapterGuard) {
-    $ids = @()
-    try { $ids = @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.Status -ne 'Disabled' } | Select-Object -ExpandProperty PnPDeviceID) }
+    $ids  = @()
+    $vues = @()
+    try { $vues = @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.Status -ne 'Disabled' }) }
     catch { Warn "Get-NetAdapter indisponible : $($_.Exception.Message)" }
+
+    # Sans liste explicite, on ecarte d'office les cartes de partage
+    # (Bluetooth PAN, RNDIS) : ce sont precisement les voies de partage de
+    # connexion qu'on cherche a bloquer, les autoriser viderait la mesure.
+    $exclus = 'Bluetooth|Personal Area|RNDIS|Remote NDIS|Tethering|iPhone|Android'
+    foreach ($a in $vues) {
+        $retenue = $false
+        if ($PSBoundParameters.ContainsKey('AllowedAdapterName')) {
+            $retenue = (@($AllowedAdapterName) -contains $a.Name)
+        }
+        elseif ($a.Name -notmatch $exclus -and $a.InterfaceDescription -notmatch $exclus) {
+            $retenue = $true
+        }
+        if ($retenue) { $ids += $a.PnPDeviceID; Info "  AUTORISEE : $($a.Name) - $($a.InterfaceDescription)" }
+        else          { Warn "  BLOQUEE   : $($a.Name) - $($a.InterfaceDescription)" }
+    }
+
     $g = Get-DodoProp $existing 'adapterGuard'
     if ($null -eq $g) { $g = [pscustomobject]@{}; Set-Prop $existing 'adapterGuard' $g }
     Set-Prop $g 'enabled' $true
     Set-Prop $g 'allowedPnpDeviceIds' $ids
-    Ok "$($ids.Count) carte(s) reseau presente(s) inscrite(s) sur liste blanche"
-    foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue)) { Info "  $($a.Name) - $($a.InterfaceDescription)" }
+    if ($ids.Count -eq 0) {
+        Warn 'Aucune carte retenue : le garde-cartes desactiverait TOUT le reseau. Il reste actif mais sans effet tant que la liste est vide.'
+    }
+    else { Ok "$($ids.Count) carte(s) reseau sur liste blanche" }
 }
 
 # Validation AVANT ecriture : une configuration invalide n'est jamais deployee.
@@ -227,10 +248,43 @@ $vbs      = Join-Path $paths.Bin 'run-notify-hidden.vbs'
 $taskPath = '\Dodo\'
 
 function New-DodoMinuteTrigger {
-    $at = (Get-Date).Date
-    try { return (New-ScheduledTaskTrigger -Once -At $at -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration ([TimeSpan]::MaxValue)) } catch { }
-    try { return (New-ScheduledTaskTrigger -Once -At $at -RepetitionInterval (New-TimeSpan -Minutes 1)) } catch { }
-    return (New-ScheduledTaskTrigger -Once -At $at)
+    <#
+        Declencheur repete toutes les minutes, sans fin.
+
+        AUCUN -RepetitionDuration : la valeur "indefiniment" obtenue depuis
+        [TimeSpan]::MaxValue est serialisee en P99999999DT23H59M59S, que le
+        planificateur de Windows 11 refuse ("valeur incorrectement formatee ou
+        hors limites", HRESULT 0x80041318). Une repetition sans duree se repete
+        indefiniment : c'est exactement l'intention. La duree est en plus videe
+        de force, au cas ou la version installee la renseignerait d'elle-meme.
+    #>
+    $t = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes 1)
+    try {
+        if ($null -ne $t.Repetition) {
+            $t.Repetition.Duration = ''
+            $t.Repetition.StopAtDurationEnd = $false
+        }
+    }
+    catch { }
+    return $t
+}
+
+function Test-DodoTaskExists {
+    param([string]$Name)
+    try { $null = Get-ScheduledTask -TaskPath $taskPath -TaskName $Name -ErrorAction Stop; return $true }
+    catch { return $false }
+}
+
+function Get-DodoTaskRepetition {
+    param([string]$Name)
+    try {
+        $t = Get-ScheduledTask -TaskPath $taskPath -TaskName $Name -ErrorAction Stop
+        foreach ($tr in @($t.Triggers)) {
+            try { if ($tr.Repetition.Interval) { return [string]$tr.Repetition.Interval } } catch { }
+        }
+    }
+    catch { }
+    return ''
 }
 
 function Repair-DodoRepetition {
@@ -241,35 +295,107 @@ function Repair-DodoRepetition {
         $changed = $false
         foreach ($tr in @($t.Triggers)) {
             if ($tr.CimClass.CimClassName -notlike '*TimeTrigger*') { continue }
-            $cur = $null
-            try { $cur = $tr.Repetition.Interval } catch { }
-            if ($cur -ne 'PT1M') { $tr.Repetition.Interval = 'PT1M'; $tr.Repetition.Duration = $null; $changed = $true }
+            if ($null -eq $tr.Repetition) { continue }
+            try {
+                if ($tr.Repetition.Interval -ne 'PT1M') { $tr.Repetition.Interval = 'PT1M'; $changed = $true }
+                if ($tr.Repetition.Duration)            { $tr.Repetition.Duration = ''    ; $changed = $true }
+                if ($tr.Repetition.StopAtDurationEnd)   { $tr.Repetition.StopAtDurationEnd = $false; $changed = $true }
+            }
+            catch { }
         }
         if ($changed) { Set-ScheduledTask -InputObject $t -ErrorAction Stop | Out-Null }
     }
-    catch { Warn "Reglage de la repetition de $Name : $($_.Exception.Message)" }
+    catch { }
+}
+
+function Register-DodoRepeatingTask {
+    <#
+        Enregistre une tache repetee chaque minute, en essayant plusieurs formes
+        jusqu'a ce qu'une repetition d'une minute soit REELLEMENT en place.
+
+        Chaque tentative est verifiee par relecture : on ne se fie pas a
+        l'absence d'exception, c'est precisement ce qui avait laisse passer le
+        declencheur a duree hors limites.
+    #>
+    param(
+        [string]$Name, $Action, $Principal, $Settings,
+        [object[]]$ExtraTriggers = @(), [string]$Description,
+        [string]$SchtasksCommand
+    )
+    $notes = New-Object System.Collections.Generic.List[string]
+
+    # 1. Forme normale : declencheur repete (+ declencheurs supplementaires)
+    try {
+        $trig = @((New-DodoMinuteTrigger)) + @($ExtraTriggers)
+        Register-ScheduledTask -TaskName $Name -TaskPath $taskPath -Force -Action $Action `
+            -Principal $Principal -Settings $Settings -Trigger $trig -Description $Description -ErrorAction Stop | Out-Null
+        if ((Get-DodoTaskRepetition -Name $Name) -eq 'PT1M') { return 'declencheur repete' }
+        $notes.Add('repetition absente apres enregistrement')
+    }
+    catch { $notes.Add("forme normale refusee : $($_.Exception.Message)") }
+
+    # 2. Enregistrement sans repetition, puis ajout par Set-ScheduledTask
+    try {
+        $trig = @((New-ScheduledTaskTrigger -Once -At (Get-Date).Date)) + @($ExtraTriggers)
+        Register-ScheduledTask -TaskName $Name -TaskPath $taskPath -Force -Action $Action `
+            -Principal $Principal -Settings $Settings -Trigger $trig -Description $Description -ErrorAction Stop | Out-Null
+        Repair-DodoRepetition -Name $Name
+        if ((Get-DodoTaskRepetition -Name $Name) -eq 'PT1M') { return 'enregistrement en deux temps' }
+        $notes.Add('repetition refusee par Set-ScheduledTask')
+    }
+    catch { $notes.Add("forme simple refusee : $($_.Exception.Message)") }
+
+    # 3. Repli schtasks.exe : /SC MINUTE ne passe par aucun XML de duree.
+    #    Reserve au compte SYSTEM, qui ne demande pas de mot de passe.
+    if ($SchtasksCommand) {
+        try {
+            $full = ($taskPath.TrimEnd('') + '' + $Name).TrimStart('')
+            $out = & schtasks.exe /Create /TN $full /SC MINUTE /MO 1 /RU 'SYSTEM' /RL 'HIGHEST' /TR $SchtasksCommand /F 2>&1
+            if ($LASTEXITCODE -eq 0 -and (Test-DodoTaskExists -Name $Name)) {
+                try { Set-ScheduledTask -TaskPath $taskPath -TaskName $Name -Settings $Settings -ErrorAction Stop | Out-Null } catch { }
+                return 'schtasks.exe'
+            }
+            $notes.Add("schtasks a renvoye $LASTEXITCODE : $($out -join ' ')")
+        }
+        catch { $notes.Add("schtasks refuse : $($_.Exception.Message)") }
+    }
+
+    throw ("aucune forme d'enregistrement n'a abouti. Tentatives : " + ($notes.ToArray() -join ' | '))
 }
 
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 
-# --- Tache 1 : application, compte SYSTEM, toutes les minutes + au demarrage
-$actEnforce = New-ScheduledTaskAction -Execute $psExe `
-    -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $enforce)
+$psArgs     = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $enforce
+$actEnforce = New-ScheduledTaskAction -Execute $psExe -Argument $psArgs
+
 $prinSystem = $null
 foreach ($u in @('SYSTEM', 'NT AUTHORITY\SYSTEM')) {
     try { $prinSystem = New-ScheduledTaskPrincipal -UserId $u -LogonType ServiceAccount -RunLevel Highest -ErrorAction Stop; break } catch { }
 }
 if ($null -eq $prinSystem) { throw "Impossible de construire le principal SYSTEM pour la tache planifiee." }
 
-Register-ScheduledTask -TaskName 'Dodo-Enforce' -TaskPath $taskPath -Force `
-    -Action $actEnforce -Principal $prinSystem -Settings $settings `
-    -Trigger @((New-DodoMinuteTrigger), (New-ScheduledTaskTrigger -AtStartup)) `
-    -Description 'Couvre-feu Dodo : applique la fenetre d extinction (compte SYSTEM).' | Out-Null
-Repair-DodoRepetition -Name 'Dodo-Enforce'
-Ok 'Dodo-Enforce enregistree (SYSTEM, toutes les minutes + au demarrage)'
+# --- Tache 1 : application de la regle, compte SYSTEM, toutes les minutes
+$voie = Register-DodoRepeatingTask -Name 'Dodo-Enforce' -Action $actEnforce -Principal $prinSystem `
+    -Settings $settings -Description 'Couvre-feu Dodo : applique la fenetre d extinction (compte SYSTEM).' `
+    -SchtasksCommand ('"{0}" {1}' -f $psExe, $psArgs)
+Ok "Dodo-Enforce enregistree (SYSTEM, toutes les minutes) - voie : $voie"
 
-# --- Tache 2 : alerte, session de l'utilisateur, sans privilege
+# --- Tache 2 : rattrapage au demarrage. Tache separee, sans repetition : elle
+#     ne depend donc d'aucun assemblage de declencheurs multiples.
+try {
+    Register-ScheduledTask -TaskName 'Dodo-Boot' -TaskPath $taskPath -Force `
+        -Action $actEnforce -Principal $prinSystem -Settings $settings `
+        -Trigger (New-ScheduledTaskTrigger -AtStartup) `
+        -Description 'Couvre-feu Dodo : reapplique la regle au demarrage du poste.' -ErrorAction Stop | Out-Null
+    Ok 'Dodo-Boot enregistree (SYSTEM, au demarrage du poste)'
+}
+catch {
+    Warn "Dodo-Boot non enregistree : $($_.Exception.Message)"
+    Info "La repetition d'une minute de Dodo-Enforce couvre deja le cas, avec au plus une minute de retard."
+}
+
+# --- Tache 3 : alerte, session de l'utilisateur, sans privilege
 $actNotify = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\wscript.exe') -Argument ('"{0}"' -f $vbs)
 $prinUser  = $null
 $principalLabel = ''
@@ -288,12 +414,16 @@ if ($null -eq $prinUser) {
     $principalLabel = "compte $($id.Identity.Name)"
 }
 
-Register-ScheduledTask -TaskName 'Dodo-Notify' -TaskPath $taskPath -Force `
-    -Action $actNotify -Principal $prinUser -Settings $settings `
-    -Trigger @((New-DodoMinuteTrigger), (New-ScheduledTaskTrigger -AtLogOn)) `
-    -Description 'Couvre-feu Dodo : preavis sonore et fenetre d alerte dans la session utilisateur.' | Out-Null
-Repair-DodoRepetition -Name 'Dodo-Notify'
-Ok "Dodo-Notify enregistree ($principalLabel, toutes les minutes + a l ouverture de session)"
+try {
+    $voieN = Register-DodoRepeatingTask -Name 'Dodo-Notify' -Action $actNotify -Principal $prinUser `
+        -Settings $settings -ExtraTriggers @((New-ScheduledTaskTrigger -AtLogOn)) `
+        -Description 'Couvre-feu Dodo : preavis sonore et fenetre d alerte dans la session utilisateur.'
+    Ok "Dodo-Notify enregistree ($principalLabel, toutes les minutes + a l ouverture de session) - voie : $voieN"
+}
+catch {
+    Warn "Dodo-Notify : $($_.Exception.Message)"
+    Warn "Les preavis sonores ne seront pas diffuses. L'extinction, elle, reste assuree par Dodo-Enforce."
+}
 
 # --------------------------------------------------------------------------
 Step 'Reseau (facultatif)'
@@ -323,16 +453,17 @@ else { Info 'Garde-cartes reseau non demande (-EnableAdapterGuard).' }
 Step 'Verification finale'
 
 $allGood = $true
-foreach ($n in @('Dodo-Enforce', 'Dodo-Notify')) {
+foreach ($n in @('Dodo-Enforce', 'Dodo-Boot', 'Dodo-Notify')) {
     try {
         $t = Get-ScheduledTask -TaskPath $taskPath -TaskName $n -ErrorAction Stop
         $rep = '(aucune)'
         foreach ($tr in @($t.Triggers)) { try { if ($tr.Repetition.Interval) { $rep = $tr.Repetition.Interval; break } } catch { } }
         if ($t.State -eq 'Disabled') { Warn "$n est DESACTIVEE"; $allGood = $false }
+        elseif ($n -eq 'Dodo-Boot')  { Ok "$n : etat=$($t.State) declencheur=au demarrage" }
         elseif ($rep -ne 'PT1M')     { Warn "$n : repetition = $rep (attendu PT1M) - le test bout-en-bout le confirmera"; $allGood = $false }
         else                          { Ok "$n : etat=$($t.State) repetition=$rep principal=$($t.Principal.UserId)$($t.Principal.GroupId)" }
     }
-    catch { Warn "$n introuvable"; $allGood = $false }
+    catch { if ($n -eq 'Dodo-Boot') { Warn "$n absente (non bloquant)" } else { Warn "$n introuvable"; $allGood = $false } }
 }
 
 try {

@@ -201,6 +201,12 @@ if (& $want 'tasks') {
         }
         catch { Chk $false "$n presente" $_.Exception.Message }
     }
+    # Dodo-Boot n'a qu'un declencheur au demarrage : pas de repetition attendue.
+    try {
+        $tb = Get-ScheduledTask -TaskPath '\Dodo\' -TaskName 'Dodo-Boot' -ErrorAction Stop
+        Chk ($tb.State -ne 'Disabled') "Dodo-Boot : etat $($tb.State)"
+    }
+    catch { Skp 'Dodo-Boot' 'absente - la repetition de Dodo-Enforce couvre le cas' }
     $before = (Get-ScheduledTaskInfo -TaskPath '\Dodo\' -TaskName 'Dodo-Enforce').LastRunTime
     Note 'attente de 75 s pour observer un declenchement spontane...'
     Start-Sleep -Seconds 75
