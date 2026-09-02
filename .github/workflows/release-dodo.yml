@@ -1,0 +1,77 @@
+name: Release Dodo
+
+# Tags dedies a Dodo (dodo-v*), pour ne pas interferer avec les releases
+# de PC Malin qui repondent aux tags v*.
+on:
+  push:
+    tags: ['dodo-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer mono (compilation de l'exe)
+        run: sudo apt-get update && sudo apt-get install -y mono-mcs mono-devel
+
+      - name: Tests du noyau de decision
+        run: |
+          if ! command -v pwsh >/dev/null 2>&1; then
+            curl -sSL -o /tmp/pwsh.tar.gz \
+              https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz
+            sudo mkdir -p /opt/pwsh
+            sudo tar -xzf /tmp/pwsh.tar.gz -C /opt/pwsh
+            sudo chmod +x /opt/pwsh/pwsh
+            sudo ln -sf /opt/pwsh/pwsh /usr/local/bin/pwsh
+          fi
+          TZ=Europe/Paris pwsh -NoProfile -File dodo/tests/Test-DodoLogic.ps1
+
+      - name: Construire l'installateur
+        run: bash dodo/build/build.sh
+
+      - name: Verifier les livrables
+        run: python3 dodo/build/verify.py
+
+      - name: Publier la pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          name: "Dodo ${{ github.ref_name }}"
+          files: |
+            dist/Dodo-Installateur.exe
+            dist/Dodo-Installateur.cmd
+          body: |
+            **Dodo** — couvre-feu automatique des ordinateurs de la maison.
+
+            Extinction **21h00 → 06h30** en période scolaire, **23h00 → 06h30** pendant
+            les vacances scolaires **zone C**, avec préavis vocal et rappels à l'écran
+            à 10, 5, 2 et 1 minute. La règle résiste au redémarrage et bloque le
+            partage de connexion du téléphone sur le portable.
+
+            ### Installation
+            Téléchargez **`Dodo-Installateur.exe`**, copiez-le sur le disque du PC,
+            double-cliquez. Windows demande l'autorisation administrateur, puis
+            l'assistant s'ouvre : aucune commande à taper.
+
+            Par défaut l'installation se fait en **mode simulation** — rien ne s'éteint
+            tant que vous n'avez pas choisi *Mise en service*.
+
+            `Dodo-Installateur.cmd` contient exactement le même code, lisible dans le
+            Bloc-notes avant lancement.
+
+            ### SmartScreen
+            L'exécutable n'est pas signé par un certificat commercial. Au premier
+            lancement Windows peut afficher « Windows a protégé votre PC » →
+            *Informations complémentaires* → *Exécuter quand même*. Les deux livrables
+            sont construits par GitHub Actions depuis les sources de ce dépôt, et la
+            construction rejoue les 119 tests du noyau ainsi que la vérification de la
+            charge utile embarquée — tout est visible dans l'onglet Actions.
+
+            ### Pré-release
+            Version de validation : à éprouver sur un PC d'essai avant déploiement.
+            Documentation : [`dodo/README.md`](https://github.com/Davy-faugere/pc-malin/blob/main/dodo/README.md)
