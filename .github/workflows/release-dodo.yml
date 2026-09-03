@@ -104,6 +104,23 @@ jobs:
             à 10, 5, 2 et 1 minute. La règle résiste au redémarrage et bloque le
             partage de connexion du téléphone sur le portable.
 
+            ### Nouveau : la voix de Windows 11, et le texte que vous écrivez
+            Windows expose deux catalogues de voix qui ne se voient pas entre eux. Sur
+            un Windows 11 français, les voix françaises (Denise, Henri…) sont dans le
+            catalogue *OneCore*, celui de *Paramètres → Heure et langue → Voix* — et il
+            est invisible pour l'interface `System.Speech` employée jusqu'ici. Le
+            message était donc lu par une voix anglaise, ou pas lu du tout.
+
+            Dodo interroge désormais **les deux** catalogues, via l'API WinRT. Dans
+            l'assistant, bouton **« Message parlé et voix… »** : vous écrivez vous-même
+            les trois textes (préavis, dernière minute, extinction), vous choisissez la
+            voix, le débit et le volume, et le bouton **Écouter** les fait dire par le
+            moteur réel. Le message est **répété** pendant que la fenêtre est affichée,
+            à la cadence que vous fixez.
+
+            Pour vérifier ce que votre PC a réellement :
+            `Show-DodoWarning.ps1 -ListVoices`, puis `-SpeakText "Malo, au lit."`
+
             ### Installation
             Téléchargez **`Dodo-Installateur.exe`**, copiez-le sur le disque du PC,
             double-cliquez. Windows demande l'autorisation administrateur, puis
