@@ -15,7 +15,16 @@
     verifie la presence du BOM.
 #>
 [CmdletBinding()]
-param([string]$SrcCmd)
+param(
+    [string]$SrcCmd,
+    # -SelfTest : construit toute l'interface puis sort SANS l'afficher.
+    # C'est le seul moyen de prouver, sur une VRAIE machine Windows, que le
+    # script se charge et s'execute jusqu'au bout. Une analyse syntaxique ne
+    # suffit pas : elle ne voit ni les erreurs d'execution, ni les appels
+    # WinForms invalides -- et le lanceur masque la console, donc une erreur
+    # au chargement se traduit par "rien ne se passe".
+    [switch]$SelfTest
+)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -45,7 +54,7 @@ function Fail($msg) {
 
 # ------------------------------------------------------- droits administrateur
 $ident = [Security.Principal.WindowsIdentity]::GetCurrent()
-if (-not ([Security.Principal.WindowsPrincipal]$ident).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+if (-not $SelfTest -and -not ([Security.Principal.WindowsPrincipal]$ident).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Fail("Dodo doit être lancé en tant qu'administrateur.`n`n" +
          "Fermez cette fenêtre, faites un clic droit sur Dodo-Installateur.exe " +
          "puis choisissez « Exécuter en tant qu'administrateur ».")
@@ -1097,5 +1106,16 @@ Log "Poste $env:COMPUTERNAME  -  $((Get-CimInstance Win32_OperatingSystem).Capti
 Log "OK   Session administrateur : $($ident.Name)"
 Log "     $($accounts.Count) compte(s) local(aux), $($admins.Count) administrateur(s), Wi-Fi : $(if($hasWifi){'présent'}else{'absent (poste fixe)'})"
 Log "     Vérifiez les quatre sections ci-dessus, puis cliquez sur Installer."
+
+if ($SelfTest) {
+    Write-Host ''
+    Write-Host 'AUTO-TEST : interface construite sans erreur.' -ForegroundColor Green
+    Write-Host ("  sections        : {0} groupes" -f @($f.Controls | Where-Object { $_ -is [System.Windows.Forms.GroupBox] }).Count)
+    Write-Host ("  horaires        : {0}" -f $lblHoraires.Text)
+    Write-Host ("  message parle   : {0}" -f $lblVoix.Text)
+    Write-Host ("  comptes listes  : {0}" -f $cbChild.Items.Count)
+    $f.Dispose()
+    exit 0
+}
 
 [void]$f.ShowDialog()

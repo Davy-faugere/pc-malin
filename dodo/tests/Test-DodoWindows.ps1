@@ -204,6 +204,21 @@ try {
     Chk ($rS.Code -eq 0) "Get-DodoStatus.ps1 se termine en code 0 (obtenu $($rS.Code))"
 
     # ======================================================================
+    Sec 'PHASE 6ter - Assistant graphique : chargement reel'
+    # L'assistant est lance par le .exe avec CreateNoWindow : une erreur au
+    # chargement ne produit AUCUN affichage, l'utilisateur voit un programme
+    # qui "ne se lance pas". Une analyse syntaxique ne suffit donc pas : il
+    # faut EXECUTER le script sur une vraie machine Windows.
+    $rA = Invoke-Ps -Script (Join-Path $srcDir 'Assistant-Dodo.ps1') -Arguments @('-SelfTest')
+    foreach ($l in $rA.Lignes) { Note $l }
+    Chk ($rA.Code -eq 0) "Assistant-Dodo.ps1 se charge et construit son interface (code $($rA.Code))" `
+        (($rA.Lignes | Where-Object { $_ -match 'Exception|erreur|Error|\+ CategoryInfo' }) -join ' | ')
+    Chk (@($rA.Lignes | Where-Object { $_ -match 'AUTO-TEST : interface construite' }).Count -gt 0) `
+        'l assistant va jusqu au bout de sa construction'
+    Chk (@($rA.Lignes | Where-Object { $_ -match 'message parle' }).Count -gt 0) `
+        'la section message parle et voix est presente dans l interface'
+
+    # ======================================================================
     Sec 'PHASE 6bis - Moteur vocal (voix modernes de Windows)'
     # C'est la couche que rien d'autre ne peut prouver : la projection WinRT
     # n'existe pas sous Linux, et les voix francaises de Windows 11 sont
