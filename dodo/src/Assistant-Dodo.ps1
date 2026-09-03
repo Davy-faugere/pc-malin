@@ -75,9 +75,11 @@ function Expand-Payload {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $SETUP)
     Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-    $src = Join-Path $SETUP 'src'
-    if (-not (Test-Path (Join-Path $src 'Install-Dodo.ps1'))) { Fail("Charge utile incomplète : Install-Dodo.ps1 manquant.") }
-    return $src
+    # $racine, pas $src : $src serait la meme variable que le $SRC de portee
+    # script (noms insensibles a la casse).
+    $racine = Join-Path $SETUP 'src'
+    if (-not (Test-Path (Join-Path $racine 'Install-Dodo.ps1'))) { Fail("Charge utile incomplète : Install-Dodo.ps1 manquant.") }
+    return $racine
 }
 $SRC = Expand-Payload
 
@@ -124,11 +126,17 @@ function Get-Adapters {
     try {
         return @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.Status -ne 'Disabled' } |
                  Sort-Object Name | ForEach-Object {
-                     $partage = ($_.Name -match $PARTAGE -or $_.InterfaceDescription -match $PARTAGE)
+                     # $estPartage, PAS $partage : $partage serait la MEME variable
+                     # que le motif $PARTAGE (noms insensibles a la casse). Le motif
+                     # etait ecrase par un booleen des la premiere carte, et toutes
+                     # les suivantes etaient comparees a "False" : plus aucune voie
+                     # de partage n'etait detectee, donc le Bluetooth PAN et le
+                     # RNDIS se retrouvaient autorises d'office.
+                     $estPartage = ($_.Name -match $PARTAGE -or $_.InterfaceDescription -match $PARTAGE)
                      [pscustomobject]@{
                          Nom     = $_.Name
-                         Libelle = '{0}  -  {1}{2}' -f $_.Name, $_.InterfaceDescription, $(if ($partage) { '   [voie de partage]' } else { '' })
-                         Partage = $partage
+                         Libelle = '{0}  -  {1}{2}' -f $_.Name, $_.InterfaceDescription, $(if ($estPartage) { '   [voie de partage]' } else { '' })
+                         Partage = $estPartage
                      }
                  })
     }
@@ -140,11 +148,22 @@ function Test-HasWifi {
 }
 
 function Get-DodoHorairesInitiales {
-    <# Horaires et periodes de depart : configuration deja installee, sinon modele livre. #>
-    $src = $null
+    <#
+        Horaires et periodes de depart : configuration deja installee, sinon
+        modele livre.
+
+        ATTENTION : la variable locale s'appelle $conf, PAS $src. Les noms de
+        variables PowerShell sont INSENSIBLES A LA CASSE : un $src local ecrase
+        le $SRC de portee script, qui est la racine des sources. Le Join-Path
+        de la ligne suivante echouait alors en "Cannot bind argument to
+        parameter 'Path' because it is null", et comme le lanceur masque la
+        console, cela donnait un installateur qui "ne se lance pas", sans le
+        moindre message.
+    #>
+    $conf = $null
     foreach ($c in @((Join-Path $ROOT 'etc\dodo.config.json'), (Join-Path $SRC 'dodo.config.json'))) {
         if (Test-Path -LiteralPath $c) {
-            try { $src = ([System.IO.File]::ReadAllText($c, [System.Text.Encoding]::UTF8) | ConvertFrom-Json); break } catch { }
+            try { $conf = ([System.IO.File]::ReadAllText($c, [System.Text.Encoding]::UTF8) | ConvertFrom-Json); break } catch { }
         }
     }
     $h = [pscustomobject]@{
@@ -153,14 +172,14 @@ function Get-DodoHorairesInitiales {
         OfflineOnly = $false
         Periodes    = (New-Object System.Collections.Generic.List[object])
     }
-    if ($null -ne $src) {
-        try { if ($src.schedule.school.start)  { $h.SchoolStart  = [string]$src.schedule.school.start }  } catch { }
-        try { if ($src.schedule.school.end)    { $h.SchoolEnd    = [string]$src.schedule.school.end }    } catch { }
-        try { if ($src.schedule.holiday.start) { $h.HolidayStart = [string]$src.schedule.holiday.start } } catch { }
-        try { if ($src.schedule.holiday.end)   { $h.HolidayEnd   = [string]$src.schedule.holiday.end }   } catch { }
-        try { $h.OfflineOnly = [bool]$src.calendar.offlineOnly } catch { }
+    if ($null -ne $conf) {
+        try { if ($conf.schedule.school.start)  { $h.SchoolStart  = [string]$conf.schedule.school.start }  } catch { }
+        try { if ($conf.schedule.school.end)    { $h.SchoolEnd    = [string]$conf.schedule.school.end }    } catch { }
+        try { if ($conf.schedule.holiday.start) { $h.HolidayStart = [string]$conf.schedule.holiday.start } } catch { }
+        try { if ($conf.schedule.holiday.end)   { $h.HolidayEnd   = [string]$conf.schedule.holiday.end }   } catch { }
+        try { $h.OfflineOnly = [bool]$conf.calendar.offlineOnly } catch { }
         try {
-            foreach ($o in @($src.calendar.overrides)) {
+            foreach ($o in @($conf.calendar.overrides)) {
                 if (-not $o.start -or -not $o.endExclusive) { continue }
                 $h.Periodes.Add([pscustomobject]@{
                     Label = [string]$o.label

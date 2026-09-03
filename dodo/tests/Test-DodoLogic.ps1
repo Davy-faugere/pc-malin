@@ -415,6 +415,45 @@ Assert-Equal 'Malo, il est temps. Extinction dans 10 minutes.' `
     (Format-DodoMessage $perso @{ minutes = 10; name = 'Malo' }) 'texte personnalise du parent, jetons substitues'
 
 # --------------------------------------------------------------------------
+Write-Section 'Variables de portee script masquees par une locale (casse)'
+# Les noms de variables PowerShell sont INSENSIBLES A LA CASSE. Une variable
+# assignee au premier niveau du script (colonne 0) est de portee script ; si
+# une locale ne differant que par la casse est assignee ailleurs, elle la
+# masque en silence. Deux defauts reels sont nes de ce piege :
+#   - $src local dans Get-DodoHorairesInitiales masquait $SRC (racine des
+#     sources) : l'assistant mourait au chargement, sans aucun message, et
+#     l'installateur "ne se lancait pas" ;
+#   - $partage local dans Get-Adapters masquait le motif $PARTAGE : des la
+#     deuxieme carte le motif valait "False", plus aucune voie de partage
+#     n'etait detectee et le Bluetooth PAN etait autorise d'office.
+$srcDir2 = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
+foreach ($f in (Get-ChildItem -Path $srcDir2 -Filter '*.ps1' -File | Sort-Object Name)) {
+    $lignes = [System.IO.File]::ReadAllLines($f.FullName)
+    # -cne, PAS -ne : l'operateur -ne de PowerShell est INSENSIBLE A LA CASSE,
+    # donc 'partage' -ne 'PARTAGE' vaut $false et le controle ne verrait rien.
+    # Ce test est tombe dans le piege qu'il verifie ; d'ou cette note.
+    $portees = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($l in $lignes) {
+        $m = [regex]::Match($l, '^\$([A-Za-z_][A-Za-z0-9_]*)\s*=')
+        if ($m.Success) { [void]$portees.Add($m.Groups[1].Value) }
+    }
+    $conflits = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $lignes) {
+        foreach ($m in [regex]::Matches($l, '\$([A-Za-z_][A-Za-z0-9_]*)\s*=')) {
+            $nom = $m.Groups[1].Value
+            foreach ($g in $portees) {
+                if ($nom -cne $g -and $nom.ToLowerInvariant() -eq $g.ToLowerInvariant()) {
+                    $conflits.Add(('$' + $nom + ' masque $' + $g))
+                }
+            }
+        }
+    }
+    Assert-Equal 0 (@($conflits | Sort-Object -Unique).Count) `
+        ("$($f.Name) : aucune locale ne masque une variable de portee script" +
+         $(if ($conflits.Count) { ' -> ' + (($conflits | Sort-Object -Unique) -join ', ') } else { '' }))
+}
+
+# --------------------------------------------------------------------------
 Write-Section 'Purete ASCII des sources (accents interdits hors messages JSON)'
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 # Regle : un .ps1 est soit en ASCII pur, soit en UTF-8 AVEC BOM. Sans BOM,
