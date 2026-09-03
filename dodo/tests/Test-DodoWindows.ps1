@@ -209,7 +209,27 @@ try {
     # chargement ne produit AUCUN affichage, l'utilisateur voit un programme
     # qui "ne se lance pas". Une analyse syntaxique ne suffit donc pas : il
     # faut EXECUTER le script sur une vraie machine Windows.
-    $rA = Invoke-Ps -Script (Join-Path $srcDir 'Assistant-Dodo.ps1') -Arguments @('-SelfTest')
+    # Lance l'assistant a travers un enveloppeur qui capture l'erreur AVEC sa
+    # ligne : "Cannot bind argument..." sans numero de ligne ne designe rien
+    # dans un script de 1100 lignes.
+    $diag = @'
+param($Assistant)
+$ErrorActionPreference = 'Stop'
+try {
+    & $Assistant -SelfTest
+    exit $LASTEXITCODE
+}
+catch {
+    Write-Host ('ECHEC ASSISTANT ligne {0} : {1}' -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
+    Write-Host ('  commande fautive : {0}' -f $_.InvocationInfo.MyCommand)
+    Write-Host ('  extrait          : {0}' -f ($_.InvocationInfo.Line).Trim())
+    Write-Host ('  pile             : {0}' -f ($_.ScriptStackTrace -replace "`r?`n", ' | '))
+    exit 1
+}
+'@
+    $fDiag = Join-Path $env:TEMP 'dodo-diag-assistant.ps1'
+    [System.IO.File]::WriteAllText($fDiag, $diag, (New-Object System.Text.UTF8Encoding($true)))
+    $rA = Invoke-Ps -Script $fDiag -Arguments @((Join-Path $srcDir 'Assistant-Dodo.ps1'))
     foreach ($l in $rA.Lignes) { Note $l }
     Chk ($rA.Code -eq 0) "Assistant-Dodo.ps1 se charge et construit son interface (code $($rA.Code))" `
         (($rA.Lignes | Where-Object { $_ -match 'Exception|erreur|Error|\+ CategoryInfo' }) -join ' | ')
