@@ -2,6 +2,16 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/) · Versioning : [SemVer](https://semver.org/lang/fr/)
 
+## [1.4.1] - 2026-09-04
+
+### Corrigé
+- **La fenêtre « Horaires et vacances » plantait au clic sur *Valider*** dès que l'heure d'extinction saisie était antérieure à l'heure de réveil — le cas normal quand on saisit une plage courte pour tester (par exemple extinction 15:30, réveil 16:00). Au lieu du message d'explication attendu, Windows affichait « Une exception non gérée s'est produite… Erreur lors de la mise en forme d'une chaîne : l'index (de base zéro) doit être supérieur ou égal à zéro et inférieur à la taille de la liste des arguments ».
+
+  Cause : dans la liste d'arguments d'une **méthode**, les virgules séparent les arguments de la méthode, pas les valeurs de l'opérateur `-f`. Écrit sans parenthèses autour du format, `[MessageBox]::Show("… {1} …" -f $a, $b, 'Dodo', 'OK')` ne transmet que `$a` à `-f`, et le jeton `{1}` échoue — à l'exécution seulement, jamais à l'analyse syntaxique
+
+### Ajouté
+- Contrôle statique de **toutes** les chaînes formatées des sources et des recettes : l'arbre syntaxique de chaque `.ps1` est relu et, pour chaque `-f` dont le format est littéral, le plus grand jeton `{n}` est comparé au nombre de valeurs fournies. La règle est stricte et assumée : au-delà d'un jeton, la droite doit être une liste littérale séparée par des virgules — c'est exactement ce qui disparaît quand on oublie les parenthèses. Le contrôle a été vérifié dans les deux sens (il tombe sur le défaut ci-dessus en le nommant à la ligne près, il passe une fois corrigé)
+
 ## [1.4.0] - 2026-09-02
 
 ### Ajouté

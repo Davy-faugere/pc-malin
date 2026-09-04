@@ -662,10 +662,16 @@ function Show-DodoHorairesDialog {
         # La fenetre doit passer minuit : l'extinction est posterieure au reveil.
         foreach ($paire in @(@($tSS, $tSE, 'scolaire'), @($tHS, $tHE, 'vacances'))) {
             if ([TimeSpan]::Parse($paire[0].Text.Trim()) -le [TimeSpan]::Parse($paire[1].Text.Trim())) {
-                [System.Windows.Forms.MessageBox]::Show(
-                    ("Règle {0} : l'heure d'extinction ({1}) doit être postérieure à l'heure de réveil ({2}).`n`n" +
-                     "La fenêtre passe minuit : par exemple 21:00 le soir, 06:30 le lendemain.") -f $paire[2], $paire[0].Text, $paire[1].Text,
-                    'Dodo', 'OK', 'Warning') | Out-Null
+                # Les parentheses autour du -f, et le passage par une variable,
+                # sont OBLIGATOIRES : dans la liste d'arguments d'une methode les
+                # virgules separent les arguments de la METHODE, pas les valeurs
+                # du format. Ecrit d'un seul tenant, -f ne recevait que $paire[2]
+                # et {1} levait "L'index (de base zero) doit etre superieur ou
+                # egal a zero et inferieur a la taille de la liste des arguments".
+                $msg = ("Règle {0} : l'heure d'extinction ({1}) doit être postérieure à l'heure de réveil ({2}).`n`n" +
+                        "La fenêtre passe minuit : par exemple 21:00 le soir, 06:30 le lendemain.") -f `
+                        $paire[2], $paire[0].Text, $paire[1].Text
+                [System.Windows.Forms.MessageBox]::Show($msg, 'Dodo', 'OK', 'Warning') | Out-Null
                 return
             }
         }

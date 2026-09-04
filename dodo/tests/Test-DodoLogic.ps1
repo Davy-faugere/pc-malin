@@ -454,6 +454,72 @@ foreach ($f in (Get-ChildItem -Path $srcDir2 -Filter '*.ps1' -File | Sort-Object
 }
 
 # --------------------------------------------------------------------------
+Write-Section 'Chaines formatees : autant de valeurs que de jetons {n}'
+# Defaut reel corrige en 1.4.1 : dans la liste d'arguments d'une METHODE, les
+# virgules separent les arguments de la methode, pas les valeurs de l'operateur
+# -f. Ecrit ainsi, sans parentheses autour du format :
+#     [MessageBox]::Show("... {1} ..." -f $a, $b, 'Dodo', 'OK')
+# l'operateur -f ne recoit que $a ; le jeton {1} leve alors, a l'execution
+# seulement, "L'index (de base zero) doit etre superieur ou egal a zero et
+# inferieur a la taille de la liste des arguments". C'est exactement ce que la
+# fenetre "Horaires et vacances" affichait au clic sur Valider.
+# Ce controle relit l'arbre syntaxique de chaque source et compare, pour chaque
+# -f dont le format est litteral, le plus grand jeton {n} au nombre de valeurs.
+$srcDir3 = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
+foreach ($f in (Get-ChildItem -Path $srcDir3, $PSScriptRoot -Filter '*.ps1' -File | Sort-Object Name)) {
+    $errs = $null; $toks = $null
+    $ast  = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$toks, [ref]$errs)
+    Assert-Equal 0 @($errs).Count "$($f.Name) : analyse syntaxique sans erreur"
+
+    $formats = $ast.FindAll({
+        param($n)
+        $n -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+        $n.Operator -eq [System.Management.Automation.Language.TokenKind]::Format
+    }, $true)
+
+    $mauvais = New-Object System.Collections.Generic.List[string]
+    foreach ($b in $formats) {
+        # Le format doit etre litteral pour etre analysable. ("a" + "b") donne
+        # deux litteraux qu'on recolle ; une variable n'en donne aucun -> ignore.
+        $litteraux = $b.Left.FindAll({
+            param($n)
+            $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
+            $n -is [System.Management.Automation.Language.ExpandableStringExpressionAst]
+        }, $true)
+        if (@($litteraux).Count -eq 0) { continue }
+        $texte = -join (@($litteraux) | ForEach-Object { $_.Value })
+
+        # {{ et }} sont des accolades litterales : les retirer avant de compter.
+        $nu = $texte.Replace('{{', '').Replace('}}', '')
+        $indices = @([regex]::Matches($nu, '\{(\d+)') | ForEach-Object { [int]$_.Groups[1].Value })
+        if ($indices.Count -eq 0) { continue }
+        $requis = (($indices | Measure-Object -Maximum).Maximum) + 1
+
+        if ($b.Right -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+            $fournis = @($b.Right.Elements).Count
+        }
+        else {
+            # Une seule expression a droite. Regle stricte assumee : des qu'un
+            # format demande deux valeurs ou plus, la droite DOIT etre une liste
+            # litterale separee par des virgules. C'est precisement ce qui
+            # disparait quand on oublie les parentheses dans un appel de
+            # methode : la droite se reduit alors a la premiere valeur, et le
+            # defaut ne se voit qu'a l'execution. Tolerer "peut-etre un
+            # tableau" ici, c'est laisser passer le defaut de 1.4.0.
+            $fournis = 1
+        }
+
+        if ($fournis -lt $requis) {
+            $mauvais.Add(("ligne {0} : {1} jeton(s) attendu(s), {2} valeur(s) fournie(s)" -f `
+                $b.Extent.StartLineNumber, $requis, $fournis))
+        }
+    }
+    Assert-Equal 0 $mauvais.Count `
+        ("$($f.Name) : chaque -f recoit assez de valeurs" +
+         $(if ($mauvais.Count) { ' -> ' + ($mauvais -join ' ; ') } else { '' }))
+}
+
+# --------------------------------------------------------------------------
 Write-Section 'Purete ASCII des sources (accents interdits hors messages JSON)'
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 # Regle : un .ps1 est soit en ASCII pur, soit en UTF-8 AVEC BOM. Sans BOM,
