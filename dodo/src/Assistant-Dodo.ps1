@@ -31,6 +31,23 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# Filet de securite sur les gestionnaires d'evenements. Sans lui, une erreur
+# dans un bouton affiche la boite .NET « Une exception non geree s'est
+# produite », qui laisse la fenetre modale OUVERTE. Or une fenetre modale
+# bloque toutes les autres fenetres de l'application : l'assistant semble
+# alors « ne plus rien declencher » quand on clique sur Tester ou Installer,
+# sans qu'aucun message n'explique pourquoi. Le message ci-dessous le dit.
+[System.Windows.Forms.Application]::add_ThreadException({
+    param($sender, $e)
+    [System.Windows.Forms.MessageBox]::Show(
+        ("Dodo a rencontré une erreur :" + [Environment]::NewLine + [Environment]::NewLine +
+         $e.Exception.Message + [Environment]::NewLine + [Environment]::NewLine +
+         "Fermez la fenêtre en cours pour revenir à l'assistant : tant qu'elle reste " +
+         "ouverte, les autres boutons ne répondent pas." + [Environment]::NewLine +
+         "Aucune modification n'a été faite sur ce PC."),
+        'Dodo', 'OK', 'Error') | Out-Null
+})
+
 # Charge utile injectee a la construction de l'exe (zip en base64).
 $PAYLOAD = 'AAPAYLOADAA'
 
