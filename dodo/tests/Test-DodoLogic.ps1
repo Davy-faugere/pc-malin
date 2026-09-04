@@ -314,6 +314,43 @@ if ($null -ne $lu) {
     # @($null) vaut 1 : le diagnostic doit compter zero, pas un fantome.
     Assert-Equal 0            $lu.HolidayCount                     'aucune periode transmise : le rapport annonce zero'
 }
+
+# --- Le compte de l'enfant ne doit JAMAIS ressortir comme compte exempte.
+# Defaut reel : l'assistant cochait d'office tout compte administrateur dans la
+# liste des adultes exemptes, donc aussi celui de l'enfant quand il est
+# administrateur. L'agent journalisait alors "Extinction suspendue : session
+# ouverte par le compte exempte 'Malo'" et le poste ne s'eteignait jamais sur
+# son profil. Le filtre est pose dans l'installateur, donc il vaut pour TOUS
+# les chemins d'appel, y compris une fiche de reponses ecrite a la main.
+$fiche2 = Join-Path ([System.IO.Path]::GetTempPath()) 'dodo-reponses-enfant-exempte.json'
+$rep2 = [pscustomobject]@{
+    InstallPath = (Join-Path ([System.IO.Path]::GetTempPath()) 'DodoTest')
+    NotifyUser  = 'Malo'
+    ExemptUsers = @('Papa', 'Malo', 'Maman')
+    Production  = $false
+}
+[System.IO.File]::WriteAllText($fiche2, ($rep2 | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+$sortie2 = ''
+try { $sortie2 = (& $installer -AnswerFile $fiche2 -ValidateOnly 2>&1 | Out-String) } catch { $sortie2 = $_.Exception.Message }
+$lu2 = $null
+foreach ($ligne in @($sortie2 -split "`n")) {
+    try { $essai = ($ligne.Trim() | ConvertFrom-Json); if ($null -ne $essai -and $essai.PSObject.Properties['NotifyUser']) { $lu2 = $essai } } catch { }
+}
+Assert-Equal $true ($null -ne $lu2) 'fiche exemptant l enfant : parametres restitues'
+if ($null -ne $lu2) {
+    Assert-Equal 2     @($lu2.ExemptUsers).Count                   'le compte de l enfant est retire des comptes exemptes'
+    Assert-Equal $true (@($lu2.ExemptUsers) -notcontains 'Malo')   'l enfant ne figure plus dans la liste'
+    Assert-Equal $true (@($lu2.ExemptUsers) -contains 'Papa')      'les adultes restent exemptes'
+    Assert-Equal $true (@($lu2.ExemptUsers) -contains 'Maman')     'le second adulte reste exempte'
+}
+Remove-Item -LiteralPath $fiche2 -Force -ErrorAction SilentlyContinue
+
+# Meme regle cote assistant : la fiche qu'il ecrit ne doit pas pouvoir
+# contenir le compte de l'enfant parmi les exemptes.
+$assist = [System.IO.File]::ReadAllText((Join-Path $srcDir 'Assistant-Dodo.ps1'))
+Assert-Equal 2 ([regex]::Matches($assist, [regex]::Escape('Where-Object { $_ -ne $child }')).Count) `
+    'l assistant filtre le compte de l enfant dans le recapitulatif ET dans la fiche de reponses'
+
 Assert-Equal $true  ((Invoke-Installer @{ AnswerFile = '/introuvable.json'; ValidateOnly = $true }) -like '*introuvable*') 'fiche de reponses absente signalee'
 Remove-Item -LiteralPath $fiche -Force -ErrorAction SilentlyContinue
 $env:ProgramData = $pdSauve

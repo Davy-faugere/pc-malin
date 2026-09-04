@@ -875,6 +875,16 @@ function Log([string]$m, $color = $null) {
 function Refresh-Child {
     $n = [string]$cbChild.SelectedItem
     if (-not $n) { $lblAdmin.Text = ''; $btnDemote.Visible = $false; return }
+    # Le compte de l'enfant ne peut pas etre en meme temps un adulte exempte :
+    # l'exempter annule le couvre-feu pour celui-la meme qu'il vise. Le cas
+    # arrivait tout seul, la preselection cochant TOUT compte administrateur --
+    # donc celui de l'enfant quand il est administrateur -- et le poste ne
+    # s'eteignait alors jamais sur son profil.
+    for ($k = 0; $k -lt $clAdults.Items.Count; $k++) {
+        if ([string]$clAdults.Items[$k] -eq $n -and $clAdults.GetItemChecked($k)) {
+            $clAdults.SetItemChecked($k, $false)
+        }
+    }
     if ($admins -contains $n) {
         $lblAdmin.Text = "ATTENTION : ce compte est administrateur."
         $lblAdmin.ForeColor = $C_ERR
@@ -1024,7 +1034,7 @@ $btnGo.Add_Click({
     # Récapitulatif : c'est ici qu'on rattrape un mauvais Wi-Fi (un réseau
     # d'entreprise détecté au lieu de celui de la maison, par exemple).
     $recap = "Compte de l'enfant : $child`n"
-    $ex = @($clAdults.CheckedItems | ForEach-Object { [string]$_ })
+    $ex = @($clAdults.CheckedItems | ForEach-Object { [string]$_ } | Where-Object { $_ -ne $child })
     $recap += "Adultes exemptés   : " + $(if ($ex.Count) { $ex -join ', ' } else { 'aucun' }) + "`n"
     $recap += ("Scolaire           : extinction {0}, réveil {1}`n" -f $script:Horaires.SchoolStart, $script:Horaires.SchoolEnd)
     $recap += ("Vacances           : extinction {0}, réveil {1}  ({2} période(s) saisie(s))`n" -f $script:Horaires.HolidayStart, $script:Horaires.HolidayEnd, $script:Horaires.Periodes.Count)
@@ -1057,7 +1067,7 @@ $btnGo.Add_Click({
     $ans = [pscustomobject]@{
         Production         = [bool]$rbProd.Checked
         NotifyUser         = $child
-        ExemptUsers        = @($clAdults.CheckedItems | ForEach-Object { [string]$_ })
+        ExemptUsers        = @($clAdults.CheckedItems | ForEach-Object { [string]$_ } | Where-Object { $_ -ne $child })
         EnableAdapterGuard = [bool]$chkNet.Checked
         AllowedSsid        = @()
         AllowedAdapterName = @()

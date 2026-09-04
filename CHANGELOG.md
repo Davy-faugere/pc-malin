@@ -2,6 +2,18 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/) · Versioning : [SemVer](https://semver.org/lang/fr/)
 
+## [1.4.2] - 2026-09-04
+
+### Corrigé
+- **Le poste ne s'éteignait jamais sur le profil de l'enfant, sans qu'aucune erreur ne le signale.** Deux causes, indépendantes, toutes deux corrigées :
+
+  1. **Le compte de l'enfant pouvait être exempté — et l'était d'office s'il était administrateur.** L'assistant pré-cochait *tous* les comptes administrateurs dans la liste des adultes exemptés, y compris celui de l'enfant. L'agent journalisait alors « Extinction suspendue : session ouverte par le compte exempté 'Malo' » et n'éteignait rien. Exempter celui que la règle vise annule la règle : le compte désigné comme celui de l'enfant est désormais retiré de la liste des exemptés par l'installateur lui-même, donc sur **tous** les chemins d'appel (assistant, fiche de réponses, ligne de commande), avec un avertissement visible.
+
+  2. **Une session d'adulte laissée ouverte en arrière-plan suspendait l'extinction indéfiniment.** La présence d'un adulte était déduite de ses processus `explorer.exe`. Or avec le changement rapide d'utilisateur, la session d'un parent reste ouverte — et son `explorer.exe` tourne — alors qu'il n'est plus devant le poste. Il suffisait donc qu'un parent ait oublié de fermer sa session pour que le couvre-feu ne s'applique plus jamais. Seul le compte réellement **ouvert à l'écran** (session attachée à la console) suspend maintenant l'extinction ; si cette session est indéterminable, l'ancienne règle, plus prudente, s'applique en repli.
+
+### Ajouté
+- `Get-DodoStatus.ps1` affiche la ligne **« Session à l'écran »** : le compte présent devant la machine et s'il est exempté ou non. C'est la ligne qui répond directement à « pourquoi le poste ne s'éteint pas »
+
 ## [1.4.1] - 2026-09-04
 
 ### Corrigé

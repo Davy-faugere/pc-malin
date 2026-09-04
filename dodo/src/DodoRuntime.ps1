@@ -416,6 +416,30 @@ function Get-DodoUserWriteRights {
     return $trouves.ToArray()
 }
 
+function Get-DodoConsoleUser {
+    <#
+        Compte reellement present DEVANT L'ECRAN, ou $null si indeterminable.
+
+        Win32_ComputerSystem.UserName renvoie le compte de la session attachee
+        a la console. C'est ce qu'il faut pour decider si on eteint "sous le nez"
+        de quelqu'un : avec le changement rapide d'utilisateur, la session d'un
+        adulte reste ouverte en arriere-plan -- son explorer.exe tourne toujours
+        -- alors qu'il n'est plus devant le poste. Se fier a la seule presence
+        des processus suspendait alors l'extinction indefiniment, et le
+        couvre-feu ne s'appliquait jamais des qu'un parent avait oublie de
+        fermer sa session.
+
+        Le nom est rendu sans le domaine. $null quand aucune session n'est
+        attachee a la console, ou quand WMI ne repond pas.
+    #>
+    try {
+        $u = (Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop).UserName
+        if ([string]::IsNullOrWhiteSpace($u)) { return $null }
+        return ($u -split '\\')[-1]
+    }
+    catch { return $null }
+}
+
 function Get-DodoInteractiveUsers {
     <#
         Comptes ayant une session graphique ouverte, deduits des processus

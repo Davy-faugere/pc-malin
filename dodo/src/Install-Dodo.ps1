@@ -102,6 +102,24 @@ if ($NotifyUser -and $NotifyUser -match '[''"]') {
     throw ("Nom de compte invalide : {0}. Les apostrophes et guillemets ne sont pas acceptes." -f $NotifyUser)
 }
 
+# Le compte de l'enfant ne peut JAMAIS figurer parmi les comptes exemptes :
+# l'exempter revient a annuler le couvre-feu pour celui-la meme qu'il vise, et
+# rien ne le signalait. Le cas se produisait tout seul -- l'assistant cochait
+# d'office TOUT compte administrateur dans la liste des adultes, donc aussi
+# celui de l'enfant quand il est administrateur. Resultat : l'agent journalisait
+# "Extinction suspendue : session ouverte par le compte exempte 'Malo'" et le
+# poste ne s'eteignait jamais sur son profil.
+# Le filtre est pose ici, avant -ValidateOnly, pour valoir sur TOUS les chemins
+# d'appel (assistant, fiche de reponses, ligne de commande).
+if ($NotifyUser -and @($ExemptUsers | Where-Object { $null -ne $_ }).Count -gt 0) {
+    $avantFiltre = @($ExemptUsers | Where-Object { $null -ne $_ })
+    $ExemptUsers = @($avantFiltre | Where-Object { $_ -ne $NotifyUser })
+    if ($PSBoundParameters.ContainsKey('ExemptUsers')) { $PSBoundParameters['ExemptUsers'] = $ExemptUsers }
+    if (@($ExemptUsers).Count -lt $avantFiltre.Count) {
+        Write-Host ("    !    Le compte de l'enfant '{0}' a ete retire de la liste des comptes exemptes : l'exempter empecherait toute extinction sur son profil." -f $NotifyUser) -ForegroundColor Yellow
+    }
+}
+
 # -ValidateOnly : on s'arrete ici en restituant les parametres tels qu'ils ont
 # ete compris, au format JSON. Permet de tester la transmission des reglages
 # sans rien installer, a l'identique sous Linux et sous Windows.

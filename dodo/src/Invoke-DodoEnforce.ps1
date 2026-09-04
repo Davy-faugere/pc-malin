@@ -107,13 +107,28 @@ if ($null -ne $exc) {
     exit 0
 }
 
-# --- Compte adulte connecte
+# --- Compte adulte REELLEMENT devant l'ecran
+# On ne suspend l'extinction que pour un adulte present a la console. Une
+# session laissee ouverte en arriere-plan par le changement rapide
+# d'utilisateur ne compte pas : sinon il suffisait qu'un parent ait oublie de
+# fermer sa session pour que le poste ne s'eteigne PLUS JAMAIS sur le profil de
+# l'enfant, et le journal n'annoncait qu'un laconique "Extinction suspendue".
 if (@($cfg.exemptUsers).Count -gt 0) {
-    $open = @(Get-DodoInteractiveUsers)
-    foreach ($u in $open) {
-        if (@($cfg.exemptUsers) -contains $u) {
-            Log "Extinction suspendue : session ouverte par le compte exempte '$u'." 'WARN'
+    $console = Get-DodoConsoleUser
+    if ($null -ne $console) {
+        if (@($cfg.exemptUsers) -contains $console) {
+            Log "Extinction suspendue : le compte exempte '$console' est celui ouvert a l'ecran." 'WARN'
             exit 0
+        }
+    }
+    else {
+        # Session console indeterminable : on retombe sur la regle precedente,
+        # plus prudente, plutot que d'eteindre a l'aveugle devant un adulte.
+        foreach ($u in @(Get-DodoInteractiveUsers)) {
+            if (@($cfg.exemptUsers) -contains $u) {
+                Log "Extinction suspendue : session console indeterminable, et le compte exempte '$u' a une session ouverte." 'WARN'
+                exit 0
+            }
         }
     }
 }

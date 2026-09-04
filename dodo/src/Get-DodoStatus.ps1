@@ -53,7 +53,19 @@ Kv 'Preavis (minutes)' (($cfg.warningMinutes | Sort-Object -Descending) -join ',
 Kv 'Delai d extinction' ("{0} s" -f $cfg.shutdownGraceSeconds)
 Kv 'Veille de rentree'  $(if ($cfg.strictNightBeforeReturn) { 'regle scolaire (stricte)' } else { 'regle vacances' })
 if (@($cfg.lateEveningsDuringTerm).Count -gt 0) { Kv 'Soirs tolerants' (@($cfg.lateEveningsDuringTerm) -join ', ') }
-if (@($cfg.exemptUsers).Count -gt 0)            { Kv 'Comptes exemptes' (@($cfg.exemptUsers) -join ', ') }
+if (@($cfg.exemptUsers).Count -gt 0) {
+    Kv 'Comptes exemptes' (@($cfg.exemptUsers) -join ', ')
+    # Ligne decisive quand "le poste ne s'eteint pas" : seul le compte ouvert a
+    # l'ecran peut suspendre l'extinction. Une session d'adulte laissee ouverte
+    # en arriere-plan (changement rapide d'utilisateur) ne compte plus.
+    $consoleUser = Get-DodoConsoleUser
+    $consoleExempte = ($null -ne $consoleUser -and (@($cfg.exemptUsers) -contains $consoleUser))
+    Kv 'Session a l ecran' $(
+        if ($null -eq $consoleUser)  { 'indeterminable - repli sur toute session ouverte' }
+        elseif ($consoleExempte)     { "$consoleUser  ->  EXEMPTE : l'extinction sera suspendue" }
+        else                         { "$consoleUser  (non exempte)" }
+    ) $(if ($consoleExempte) { 'Yellow' } else { 'Gray' })
+}
 
 Head 'Calendrier scolaire'
 if ($Refresh) {
