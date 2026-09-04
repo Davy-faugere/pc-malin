@@ -367,6 +367,20 @@ catch {
         Start-Sleep -Seconds 95
         $i1 = Get-ScheduledTaskInfo -TaskPath '\Dodo\' -TaskName 'Dodo-Enforce'
         Chk ($i1.LastRunTime -gt $t0) "Dodo-Enforce s est declenchee seule (avant $t0, apres $($i1.LastRunTime))"
+
+        # 267009 = 0x00041301 = SCHED_S_TASK_RUNNING. Ce n'est PAS un code
+        # d'erreur : c'est le planificateur qui repond "l'execution est encore
+        # en cours". Lire LastTaskResult juste apres le declenchement est donc
+        # une course, et elle a fait echouer la recette alors que rien n'etait
+        # casse. On attend la fin de l'execution avant de juger, avec une borne
+        # pour ne jamais bloquer la chaine.
+        $EN_COURS = 267009
+        $limite   = (Get-Date).AddSeconds(60)
+        while ($i1.LastTaskResult -eq $EN_COURS -and (Get-Date) -lt $limite) {
+            Start-Sleep -Seconds 2
+            $i1 = Get-ScheduledTaskInfo -TaskPath '\Dodo\' -TaskName 'Dodo-Enforce'
+        }
+        Chk ($i1.LastTaskResult -ne $EN_COURS) 'Dodo-Enforce a fini son execution avant la lecture du resultat'
         Chk ($i1.LastTaskResult -eq 0) "Dodo-Enforce se termine en code 0 (obtenu $($i1.LastTaskResult))"
     }
 }
