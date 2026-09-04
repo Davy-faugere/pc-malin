@@ -81,7 +81,10 @@ $reponses = [pscustomobject]@{
     InstallPath        = $Root
     Production         = $false
     NotifyUser         = $env:USERNAME
-    ExemptUsers        = @($env:USERNAME)
+    # Le compte de l'enfant (NotifyUser) est volontairement place ici : la
+    # recette verifie que l'installateur le RETIRE, tout en laissant passer les
+    # vrais comptes adultes.
+    ExemptUsers        = @($env:USERNAME, 'ParentDeTest')
     EnableAdapterGuard = $true
     AllowedAdapterName = @($cartes)
     AllowedSsid        = @()
@@ -130,7 +133,11 @@ try {
         Chk ($cfg.dryRun -eq $true)                     'mode simulation actif'
         Chk ($cfg.schedule.school.start -eq '21:00')    'horaire scolaire transmis par la fiche de reponses'
         Chk ($cfg.schedule.holiday.start -eq '23:00')   'horaire vacances transmis'
-        Chk (@($cfg.exemptUsers) -contains $env:USERNAME) 'compte exempte transmis'
+        # Exempter le compte de l'enfant annulerait le couvre-feu pour celui-la
+        # meme qu'il vise : l'installateur doit l'avoir retire, et n'avoir
+        # touche a rien d'autre.
+        Chk (@($cfg.exemptUsers) -notcontains $env:USERNAME) 'le compte de l enfant est retire des comptes exemptes'
+        Chk (@($cfg.exemptUsers) -contains 'ParentDeTest')   'les autres comptes exemptes sont transmis'
         Chk (@($cfg.calendar.overrides).Count -eq 1)    'periode de vacances manuelle transmise'
         Chk ($cfg.speech.enabled -eq $true)             'reglages de voix transmis par la fiche de reponses'
         Chk ($cfg.speech.repeatEverySeconds -eq 15)     'cadence de repetition transmise'
@@ -324,6 +331,10 @@ catch {
     $depart = (Get-Date).AddMinutes(60)
     $raw | Add-Member -NotePropertyName 'testWindow' -NotePropertyValue ([pscustomobject]@{
         start = $depart.ToString('s'); end = $depart.AddMinutes(5).ToString('s'); label = 'recette windows' }) -Force
+    # L'exemption est ecrite ici DIRECTEMENT dans la configuration : c'est le
+    # comportement de l'AGENT que la phase 7a eprouve, pas le filtre de
+    # l'installateur (qui, lui, refuserait d'exempter le compte de l'enfant).
+    $raw | Add-Member -NotePropertyName 'exemptUsers' -NotePropertyValue @($env:USERNAME) -Force
     Write-DodoJson -Path $paths.Config -Object $raw
     Write-DodoText -Path $paths.ClockOffset -Content '60'
 
