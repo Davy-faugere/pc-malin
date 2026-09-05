@@ -1,0 +1,153 @@
+name: Release Dodo
+
+# Tags dedies a Dodo (dodo-v*), pour ne pas interferer avec les releases
+# de PC Malin qui repondent aux tags v*.
+on:
+  push:
+    # Tag classique quand on peut en pousser un.
+    tags: ['dodo-v*']
+    # Branche de declenchement : les identifiants d'une session agent sont
+    # limites a refs/heads/*, un push de tag y est refuse en 403. Pousser
+    # release/dodo-vX.Y.Z declenche donc la construction, et c'est l'Action
+    # qui cree le tag avec GITHUB_TOKEN. La branche est supprimee a la fin.
+    branches: ['release/dodo-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag de la pre-release (ex. dodo-v1.3.0-rc1)"
+        required: true
+        default: "dodo-v1.3.0-rc1"
+
+permissions:
+  contents: write
+
+jobs:
+  # Rien ne se publie sans etre passe par une machine Windows reelle :
+  # ACL NTFS, planificateur de taches, passage d'arguments et netsh ne sont
+  # observables nulle part ailleurs.
+  windows:
+    name: Validation sur Windows reel
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests hors ligne sous Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\dodo\tests\Test-DodoLogic.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Installation, verification et desinstallation reelles
+        shell: powershell
+        run: |
+          .\dodo\tests\Test-DodoWindows.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+  build:
+    runs-on: ubuntu-latest
+    needs: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determiner le tag de la release
+        id: tag
+        run: |
+          NAME="${{ github.event.inputs.tag }}"
+          if [ -z "$NAME" ]; then
+            case "$GITHUB_REF" in
+              refs/tags/*)            NAME="${GITHUB_REF#refs/tags/}" ;;
+              refs/heads/release/*)   NAME="${GITHUB_REF#refs/heads/release/}" ;;
+              *)                      echo "Reference inattendue : $GITHUB_REF" >&2 ; exit 1 ;;
+            esac
+          fi
+          case "$NAME" in
+            dodo-v*) ;;
+            *) echo "Nom de tag invalide : '$NAME' (attendu dodo-v*)" >&2 ; exit 1 ;;
+          esac
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Tag retenu : $NAME"
+
+      - name: Installer mono (compilation de l'exe)
+        run: sudo apt-get update && sudo apt-get install -y mono-mcs mono-devel
+
+      - name: Tests du noyau de decision
+        run: |
+          if ! command -v pwsh >/dev/null 2>&1; then
+            curl -sSL -o /tmp/pwsh.tar.gz \
+              https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz
+            sudo mkdir -p /opt/pwsh
+            sudo tar -xzf /tmp/pwsh.tar.gz -C /opt/pwsh
+            sudo chmod +x /opt/pwsh/pwsh
+            sudo ln -sf /opt/pwsh/pwsh /usr/local/bin/pwsh
+          fi
+          TZ=Europe/Paris pwsh -NoProfile -File dodo/tests/Test-DodoLogic.ps1
+
+      - name: Construire l'installateur
+        run: bash dodo/build/build.sh
+
+      - name: Verifier les livrables
+        run: python3 dodo/build/verify.py
+
+      - name: Publier la pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          tag_name: ${{ steps.tag.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          name: "Dodo ${{ steps.tag.outputs.name }}"
+          files: |
+            dist/Dodo-Installateur.exe
+            dist/Dodo-Installateur.cmd
+          body: |
+            **Dodo** — couvre-feu automatique des ordinateurs de la maison.
+
+            Extinction **21h00 → 06h30** en période scolaire, **23h00 → 06h30** pendant
+            les vacances scolaires **zone C**, avec préavis vocal et rappels à l'écran
+            à 10, 5, 2 et 1 minute. La règle résiste au redémarrage et bloque le
+            partage de connexion du téléphone sur le portable.
+
+            ### Nouveau : la voix de Windows 11, et le texte que vous écrivez
+            Windows expose deux catalogues de voix qui ne se voient pas entre eux. Sur
+            un Windows 11 français, les voix françaises (Denise, Henri…) sont dans le
+            catalogue *OneCore*, celui de *Paramètres → Heure et langue → Voix* — et il
+            est invisible pour l'interface `System.Speech` employée jusqu'ici. Le
+            message était donc lu par une voix anglaise, ou pas lu du tout.
+
+            Dodo interroge désormais **les deux** catalogues, via l'API WinRT. Dans
+            l'assistant, bouton **« Message parlé et voix… »** : vous écrivez vous-même
+            les trois textes (préavis, dernière minute, extinction), vous choisissez la
+            voix, le débit et le volume, et le bouton **Écouter** les fait dire par le
+            moteur réel. Le message est **répété** pendant que la fenêtre est affichée,
+            à la cadence que vous fixez.
+
+            Pour vérifier ce que votre PC a réellement :
+            `Show-DodoWarning.ps1 -ListVoices`, puis `-SpeakText "Malo, au lit."`
+
+            ### Installation
+            Téléchargez **`Dodo-Installateur.exe`**, copiez-le sur le disque du PC,
+            double-cliquez. Windows demande l'autorisation administrateur, puis
+            l'assistant s'ouvre : aucune commande à taper.
+
+            Par défaut l'installation se fait en **mode simulation** — rien ne s'éteint
+            tant que vous n'avez pas choisi *Mise en service*.
+
+            `Dodo-Installateur.cmd` contient exactement le même code, lisible dans le
+            Bloc-notes avant lancement.
+
+            ### SmartScreen
+            L'exécutable n'est pas signé par un certificat commercial. Au premier
+            lancement Windows peut afficher « Windows a protégé votre PC » →
+            *Informations complémentaires* → *Exécuter quand même*. Les deux livrables
+            sont construits par GitHub Actions depuis les sources de ce dépôt, et la
+            publication est conditionnée à trois étapes vertes : l'intégralité des tests
+            du noyau, la recette d'intégration sur une machine Windows réelle
+            (installation, droits, tâches planifiées, agents, désinstallation) et la
+            vérification de la charge utile embarquée — tout est visible dans l'onglet
+            Actions.
+
+            ### Pré-release
+            Version de validation : à éprouver sur un PC d'essai avant déploiement.
+            Documentation : [`dodo/README.md`](https://github.com/Davy-faugere/pc-malin/blob/main/dodo/README.md)
+
+      - name: Retirer la branche de declenchement
+        if: startsWith(github.ref, 'refs/heads/release/')
+        continue-on-error: true
+        run: git push origin --delete "${GITHUB_REF#refs/heads/}"

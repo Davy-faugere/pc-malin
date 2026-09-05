@@ -1,0 +1,10 @@
+{
+  "_lisezmoi": "Textes prononces et affiches. Jetons disponibles : {minutes} et {name}. Fichier lu en UTF-8 : les accents sont autorises ici (et seulement ici). Modifiable sans editer ce fichier : assistant > Message parle et voix.",
+
+  "popupTitle":  "Extinction programmée",
+  "warning":     "Attention {name}, l'ordinateur va s'éteindre dans {minutes} minutes. Pense à enregistrer ton travail.",
+  "warningOne":  "Attention {name}, l'ordinateur va s'éteindre dans une minute. Enregistre tout de suite.",
+  "shutdownNow": "Il est l'heure de dormir. L'ordinateur s'éteint maintenant. Bonne nuit !",
+  "bootBlocked": "Il est trop tard pour l'ordinateur. Il va s'éteindre. Bonne nuit !",
+  "popupFooter": "Règle parentale — extinction automatique. Reprise possible à partir de 6h30."
+}

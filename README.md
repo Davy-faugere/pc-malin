@@ -66,6 +66,14 @@ Chaque release est **construite automatiquement par GitHub Actions** depuis ces 
 ./build/build.sh   # → dist/PC-Malin.cmd + dist/PC-Malin.exe
 ```
 
+## 🌙 Aussi dans ce dépôt : **Dodo**
+
+Un couvre-feu automatique pour les ordinateurs des enfants : extinction à 21h00 en
+période scolaire et 23h00 pendant les vacances zone C, avec préavis vocal 10 minutes
+avant et résistance au redémarrage. Indépendant de PC Malin, installable seul.
+
+→ **[dodo/README.md](dodo/README.md)** · [Trois solutions comparées](dodo/docs/01-solutions.md) · [Déploiement](dodo/docs/02-deploiement.md)
+
 ## 🤝 Contribuer
 
 Les idées et corrections sont bienvenues — c'est le but du dépôt.
