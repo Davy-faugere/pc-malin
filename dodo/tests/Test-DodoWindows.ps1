@@ -403,6 +403,52 @@ catch {
         Chk ($i1.LastTaskResult -ne $EN_COURS) 'Dodo-Enforce a fini son execution avant la lecture du resultat'
         Chk ($i1.LastTaskResult -eq 0) "Dodo-Enforce se termine en code 0 (obtenu $($i1.LastTaskResult))"
     }
+
+    # ======================================================================
+    Sec 'PHASE 8bis - Extinction REELLE : la commande part-elle vraiment ?'
+    # C'est le SEUL chemin que la recette n'eprouvait pas : en simulation
+    # l'agent s'arrete juste avant shutdown.exe. Tout ce qui suit cette ligne
+    # -- construction du commentaire, passage des arguments, appel reel --
+    # n'avait donc jamais tourne nulle part.
+    # Methode : on passe en mode reel avec un delai de 600 s, on laisse l'agent
+    # commander l'extinction, puis on l'annule aussitot. "shutdown /a" ne
+    # renvoie 0 QUE si une extinction etait reellement programmee : c'est la
+    # preuve recherchee, et elle ne coute pas la machine.
+    try {
+        $rawR = Read-DodoJson -Path $paths.Config
+        $rawR | Add-Member -NotePropertyName 'dryRun'               -NotePropertyValue $false -Force
+        $rawR | Add-Member -NotePropertyName 'shutdownGraceSeconds' -NotePropertyValue 600    -Force
+        $rawR | Add-Member -NotePropertyName 'bootGraceSeconds'     -NotePropertyValue 600    -Force
+        $rawR | Add-Member -NotePropertyName 'exemptUsers'          -NotePropertyValue @()    -Force
+        $depR = (Get-Date).AddMinutes(-1)
+        $rawR | Add-Member -NotePropertyName 'testWindow' -NotePropertyValue ([pscustomobject]@{
+            start = $depR.ToString('s'); end = $depR.AddMinutes(5).ToString('s'); label = 'extinction reelle recette' }) -Force
+        Write-DodoJson -Path $paths.Config -Object $rawR
+
+        foreach ($f in @($paths.Pending, $paths.Decision)) {
+            if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+        }
+        $nR = @(Get-Content -LiteralPath $journal -ErrorAction SilentlyContinue).Count
+        $rR = Invoke-Ps -Script (Join-Path $paths.Bin 'Invoke-DodoEnforce.ps1')
+        foreach ($l in (Get-NouvellesLignes -Depuis $nR)) { Note $l }
+        Chk ($rR.Code -eq 0) "l agent se termine en code 0 en mode reel (obtenu $($rR.Code))" ($rR.Lignes -join ' ')
+
+        $sortieAbort = @(& shutdown.exe /a 2>&1)
+        $codeAbort   = $LASTEXITCODE
+        Note ("shutdown /a -> code $codeAbort : " + ($sortieAbort -join ' '))
+        Chk ($codeAbort -eq 0) 'une extinction etait REELLEMENT programmee (shutdown /a l a annulee)' `
+            ("code $codeAbort : " + ($sortieAbort -join ' '))
+    }
+    finally {
+        & shutdown.exe /a 2>&1 | Out-Null
+        $rawZ = Read-DodoJson -Path $paths.Config
+        $rawZ | Add-Member -NotePropertyName 'dryRun' -NotePropertyValue $true -Force
+        if ($null -ne $rawZ.PSObject.Properties['testWindow']) { $rawZ.PSObject.Properties.Remove('testWindow') }
+        Write-DodoJson -Path $paths.Config -Object $rawZ
+        foreach ($f in @($paths.Pending, $paths.Decision)) {
+            if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+        }
+    }
 }
 finally {
     # ======================================================================
