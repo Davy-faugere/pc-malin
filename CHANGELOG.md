@@ -2,6 +2,15 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/) · Versioning : [SemVer](https://semver.org/lang/fr/)
 
+## [1.4.3] - 2026-09-05
+
+### Corrigé
+- **L'agent d'extinction pouvait ne rien faire sans laisser la moindre trace.** Sur la plupart de ses chemins de sortie il s'arrêtait en silence, et une erreur non prévue le tuait sans écrire une ligne. Résultat : quand le poste ne s'éteignait pas, le journal était vide — c'est-à-dire illisible exactement au moment où il fallait comprendre pourquoi. Désormais :
+  - un filet global journalise toute erreur non prévue, avec le numéro de ligne, dans le journal Dodo **et** dans le journal Windows ;
+  - chaque décision est écrite : hors fenêtre (avec la date de la prochaine extinction), Dodo désactivé, dérogation en cours, compte exempté à l'écran, extinction déjà commandée ;
+  - ces lignes ne sont écrites qu'au **changement** de décision, pas à chaque minute : le journal reste lisible au lieu de se remplir de 1440 lignes identiques par jour.
+- Un message d'extinction personnalisé illisible ou vide ne peut plus empêcher l'extinction : le texte par défaut prend le relais et l'incident est journalisé
+
 ## [1.4.2] - 2026-09-04
 
 ### Corrigé

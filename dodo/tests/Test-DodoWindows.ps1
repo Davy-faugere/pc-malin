@@ -198,9 +198,18 @@ try {
     $journal = Join-Path $paths.Logs ('dodo-{0}.log' -f (Get-Date).ToString('yyyyMMdd'))
     $rE = Invoke-Ps -Script (Join-Path $paths.Bin 'Invoke-DodoEnforce.ps1')
     Chk ($rE.Code -eq 0) "Invoke-DodoEnforce.ps1 se termine en code 0 (obtenu $($rE.Code))" ($rE.Lignes -join ' ')
-    # Hors fenetre d'extinction l'agent n'a rien a dire : le silence est le
-    # comportement attendu, un journal vide n'est donc pas un defaut. Sa
-    # presence est verifiee en phase 7, quand un evenement se produit.
+    # Hors fenetre, l'agent doit DIRE qu'il ne fait rien et pourquoi. Le silence
+    # etait le comportement precedent : le journal restait vide les soirs ou
+    # l'extinction n'avait pas lieu, c'est-a-dire exactement quand il faut
+    # savoir pourquoi. La decision n'est ecrite qu'une fois tant qu'elle ne
+    # change pas, donc le journal ne se remplit pas de lignes identiques.
+    $jEtat = @(Get-Content -LiteralPath $journal -ErrorAction SilentlyContinue)
+    Chk (@($jEtat | Where-Object { $_ -match "Hors fenetre d'extinction" }).Count -gt 0) `
+        'hors fenetre : l agent journalise sa decision et la prochaine extinction' ($jEtat -join ' | ')
+    $nAvant = $jEtat.Count
+    $null = Invoke-Ps -Script (Join-Path $paths.Bin 'Invoke-DodoEnforce.ps1')
+    $jApres = @(Get-Content -LiteralPath $journal -ErrorAction SilentlyContinue)
+    Chk ($jApres.Count -eq $nAvant) 'decision inchangee : rien n est rejournalise'
 
     $rD = Invoke-Ps -Script (Join-Path $paths.Bin 'Show-DodoWarning.ps1') -Arguments @('-Diagnose')
     Chk ($rD.Code -eq 0) "Show-DodoWarning.ps1 -Diagnose se termine en code 0 (obtenu $($rD.Code))"

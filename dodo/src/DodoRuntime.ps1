@@ -37,6 +37,7 @@ function Get-DodoPaths {
         Exception   = Join-Path $r 'var\exception.json'
         ClockOffset = Join-Path $r 'var\clock-offset.txt'
         Pending     = Join-Path $r 'var\shutdown-pending.txt'
+        Decision    = Join-Path $r 'var\derniere-decision.txt'
     }
 }
 

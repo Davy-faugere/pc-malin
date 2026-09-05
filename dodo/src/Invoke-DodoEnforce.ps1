@@ -28,6 +28,34 @@ function Log { param([string]$m, [string]$l = 'INFO', [switch]$Event)
     Write-DodoLog -Message $m -Level $l -LogDirectory $logDir -AlsoEventLog:$Event | Out-Null
 }
 
+# Toute erreur non prevue doit laisser une trace. Sans ce filet, l'agent mourait
+# en silence : le planificateur conservait bien un code de retour, mais le
+# journal restait vide et "le poste ne s'eteint pas" devenait indiagnosticable.
+trap {
+    Log ("ERREUR NON PREVUE ligne $($_.InvocationInfo.ScriptLineNumber) : $($_.Exception.Message)") 'ERROR' -Event
+    exit 4
+}
+
+function Log-Decision {
+    <#
+        Journalise une decision UNE SEULE FOIS, tant qu'elle ne change pas.
+
+        L'agent tourne toutes les minutes. Journaliser a chaque passage
+        remplirait le journal de 1440 lignes identiques par jour ; ne rien
+        journaliser laissait au contraire un journal vide les soirs ou
+        l'extinction n'avait pas lieu -- exactement quand on a besoin de savoir
+        pourquoi. On n'ecrit donc que sur CHANGEMENT de decision.
+    #>
+    param([string]$Cle, [string]$Message, [string]$Niveau = 'INFO')
+    try {
+        $ancien = Read-DodoText -Path $paths.Decision
+        if (-not [string]::IsNullOrWhiteSpace($ancien) -and $ancien.Trim() -eq $Cle) { return }
+        Write-DodoText -Path $paths.Decision -Content $Cle
+    }
+    catch { }
+    Log $Message $Niveau
+}
+
 try { $cfg = Get-DodoConfiguration -Root $Root }
 catch {
     # Configuration illisible : on ne peut pas decider, on ne fait rien mais on crie.
@@ -35,7 +63,10 @@ catch {
     exit 2
 }
 
-if (-not $cfg.enabled) { exit 0 }
+if (-not $cfg.enabled) {
+    Log-Decision 'desactive' 'Dodo est DESACTIVE (enabled = false) : aucune extinction ne sera declenchee.' 'WARN'
+    exit 0
+}
 
 $now = Get-DodoNow -Config $cfg -Root $Root
 
@@ -97,13 +128,16 @@ $state = Get-DodoState -Now $now -Config $cfg -Periods $cal.Periods -CalendarTru
 
 if ($state.State -ne 'Blocked') {
     if (Test-Path -LiteralPath $paths.Pending) { Remove-Item -LiteralPath $paths.Pending -Force -ErrorAction SilentlyContinue }
+    Log-Decision ('libre|' + $state.BlockStart.ToString('yyyy-MM-dd HH:mm')) `
+        ("Hors fenetre d'extinction. Prochaine extinction prevue le {0} (regle {1})." -f $state.BlockStart.ToString('dd/MM a HH:mm'), $state.WindowKind)
     exit 0
 }
 
 # --- Derogation posee par un parent
 $exc = Get-DodoActiveException -Root $Root -Now $now
 if ($null -ne $exc) {
-    Log ("Fenetre d'extinction active mais derogation en cours jusqu'a {0} (motif : {1}, par {2})." -f $exc.Until.ToString('yyyy-MM-dd HH:mm'), $exc.Reason, $exc.By) 'WARN'
+    Log-Decision ('derogation|' + $exc.Until.ToString('s')) `
+        ("Fenetre d'extinction active mais derogation en cours jusqu'a {0} (motif : {1}, par {2})." -f $exc.Until.ToString('yyyy-MM-dd HH:mm'), $exc.Reason, $exc.By) 'WARN'
     exit 0
 }
 
@@ -117,7 +151,7 @@ if (@($cfg.exemptUsers).Count -gt 0) {
     $console = Get-DodoConsoleUser
     if ($null -ne $console) {
         if (@($cfg.exemptUsers) -contains $console) {
-            Log "Extinction suspendue : le compte exempte '$console' est celui ouvert a l'ecran." 'WARN'
+            Log-Decision ('exempte|' + $console) "Extinction suspendue : le compte exempte '$console' est celui ouvert a l'ecran." 'WARN'
             exit 0
         }
     }
@@ -126,7 +160,7 @@ if (@($cfg.exemptUsers).Count -gt 0) {
         # plus prudente, plutot que d'eteindre a l'aveugle devant un adulte.
         foreach ($u in @(Get-DodoInteractiveUsers)) {
             if (@($cfg.exemptUsers) -contains $u) {
-                Log "Extinction suspendue : session console indeterminable, et le compte exempte '$u' a une session ouverte." 'WARN'
+                Log-Decision ('exempte-repli|' + $u) "Extinction suspendue : session console indeterminable, et le compte exempte '$u' a une session ouverte." 'WARN'
                 exit 0
             }
         }
@@ -148,7 +182,11 @@ $pendingAt   = Read-DodoText -Path $paths.Pending
 if (-not [string]::IsNullOrWhiteSpace($pendingAt)) {
     try {
         $t = [datetime]::Parse($pendingAt.Trim(), [System.Globalization.CultureInfo]::InvariantCulture)
-        if (((Get-Date) - $t).TotalSeconds -lt $graceWindow) { exit 0 }
+        if (((Get-Date) - $t).TotalSeconds -lt $graceWindow) {
+            Log-Decision ('en-cours|' + $pendingAt.Trim()) `
+                ("Extinction deja commandee a {0} : on laisse le delai de {1} s s'ecouler." -f $t.ToString('HH:mm:ss'), $grace)
+            exit 0
+        }
         Log "Extinction precedente non aboutie (annulation manuelle ?) : nouvelle commande emise." 'WARN' -Event
     }
     catch { }
@@ -169,7 +207,12 @@ if ($cfg.dryRun) {
 
 # shutdown.exe n'accepte pas de facon fiable les caracteres accentues : on
 # translittere le commentaire affiche par Windows.
-$comment = ConvertTo-DodoAscii ((Format-DodoMessage $msgs.shutdownNow @{ name = '' }).Trim())
+# Le commentaire affiche par Windows ne doit JAMAIS empecher l'extinction :
+# un message personnalise illisible ou vide ne peut pas faire echouer l'agent.
+$comment = ''
+try { $comment = ConvertTo-DodoAscii ((Format-DodoMessage $msgs.shutdownNow @{ name = '' }).Trim()) }
+catch { Log "Message d'extinction illisible ($($_.Exception.Message)) : texte par defaut utilise." 'WARN' }
+if ([string]::IsNullOrWhiteSpace($comment)) { $comment = 'Dodo : extinction programmee.' }
 if ($comment.Length -gt 500) { $comment = $comment.Substring(0, 500) }
 
 try {

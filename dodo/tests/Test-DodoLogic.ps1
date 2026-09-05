@@ -557,6 +557,29 @@ foreach ($f in (Get-ChildItem -Path $srcDir3, $PSScriptRoot -Filter '*.ps1' -Fil
 }
 
 # --------------------------------------------------------------------------
+Write-Section 'L agent d extinction ne peut plus sortir en silence'
+# Defaut constate : le poste ne s'eteignait pas et le journal etait VIDE, donc
+# rien ne permettait de dire pourquoi. L'agent sortait sans un mot sur la
+# plupart de ses chemins, et une erreur non prevue le tuait sans laisser de
+# trace. Ces controles verrouillent le contraire.
+$agent = [System.IO.File]::ReadAllText((Join-Path $srcDir2 'Invoke-DodoEnforce.ps1'))
+Assert-Equal $true ($agent -match '(?m)^trap \{') `
+    'une erreur non prevue est journalisee au lieu de tuer l agent en silence'
+Assert-Equal $true ($agent -match 'function Log-Decision') `
+    'les decisions sont journalisees, une fois par changement'
+foreach ($cas in @('desactive', 'libre|', 'derogation|', 'exempte|', 'exempte-repli|', 'en-cours|')) {
+    Assert-Equal $true ($agent.Contains("'" + $cas)) `
+        ("chemin de sortie journalise : " + $cas)
+}
+# Le chemin de secours du commentaire d'extinction : un texte de parent
+# illisible ne doit pas empecher l'extinction.
+Assert-Equal $true ($agent.Contains('IsNullOrWhiteSpace($comment)')) `
+    'un message d extinction vide ne bloque pas l extinction'
+$runtime = [System.IO.File]::ReadAllText((Join-Path $srcDir2 'DodoRuntime.ps1'))
+Assert-Equal $true ($runtime -match "Decision\s+=\s+Join-Path") `
+    'le fichier de derniere decision a un chemin declare'
+
+# --------------------------------------------------------------------------
 Write-Section 'Purete ASCII des sources (accents interdits hors messages JSON)'
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 # Regle : un .ps1 est soit en ASCII pur, soit en UTF-8 AVEC BOM. Sans BOM,
