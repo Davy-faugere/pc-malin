@@ -2,6 +2,11 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/) · Versioning : [SemVer](https://semver.org/lang/fr/)
 
+## [1.4.5] - 2026-09-05
+
+### Modifié
+- **Interface modernisée.** L'assistant est net sur les écrans haute définition (il était agrandi à partir d'une image basse résolution, donc flou). Les cadres gravés hérités de Windows XP laissent place à des cartes blanches à filet clair, les boutons sont plats, à coins arrondis, avec effet de survol, et l'en-tête ainsi que le journal ont été repris. Aucun changement de comportement : mêmes champs, mêmes réglages, mêmes actions
+
 ## [1.4.4] - 2026-09-05
 
 ### Corrigé

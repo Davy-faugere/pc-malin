@@ -31,6 +31,21 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# Nettete sur les ecrans haute definition. Sans cela Windows agrandit
+# l'interface a partir d'une image basse resolution : tout parait flou.
+# Enrobe dans un try : un assistant flou reste utilisable, un assistant qui
+# ne demarre pas, non.
+try {
+    if (-not ([System.Management.Automation.PSTypeName]'Dodo.Ecran').Type) {
+        Add-Type -Namespace 'Dodo' -Name 'Ecran' -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool SetProcessDPIAware();
+'@
+    }
+    [void][Dodo.Ecran]::SetProcessDPIAware()
+}
+catch { }
+
 # Filet de securite sur les gestionnaires d'evenements. Sans lui, une erreur
 # dans un bouton affiche la boite .NET « Une exception non geree s'est
 # produite », qui laisse la fenetre modale OUVERTE. Or une fenetre modale
@@ -63,6 +78,10 @@ $C_PANEL  = [System.Drawing.Color]::White
 $C_WARN   = [System.Drawing.Color]::FromArgb(180, 83, 9)
 $C_ERR    = [System.Drawing.Color]::FromArgb(185, 28, 28)
 $C_OK     = [System.Drawing.Color]::FromArgb(6, 95, 70)
+$C_BORD   = [System.Drawing.Color]::FromArgb(226, 230, 235)   # trait des cartes
+$C_MUTE   = [System.Drawing.Color]::FromArgb(107, 119, 133)   # texte secondaire
+$C_HOVER  = [System.Drawing.Color]::FromArgb(13, 166, 200)    # survol du bouton principal
+$C_DOUX   = [System.Drawing.Color]::FromArgb(241, 244, 247)   # fond des boutons secondaires
 
 function Fail($msg) {
     [System.Windows.Forms.MessageBox]::Show($msg, 'Dodo', 'OK', 'Error') | Out-Null
@@ -322,12 +341,12 @@ function Show-DodoVoixDialog {
 
     $btnEcoute = New-Object System.Windows.Forms.Button
     $btnEcoute.Text = 'Écouter'; $btnEcoute.SetBounds(474, 52, 90, 27)
-    $btnEcoute.BackColor = $C_ACCENT; $btnEcoute.ForeColor = [System.Drawing.Color]::White
-    $btnEcoute.FlatStyle = 'Flat'; $btnEcoute.FlatAppearance.BorderSize = 0
     $gv.Controls.Add($btnEcoute)
+    $null = Style-Bouton $btnEcoute -Principal
 
     $btnRelire = New-Object System.Windows.Forms.Button
     $btnRelire.Text = 'Rechercher'; $btnRelire.SetBounds(572, 52, 84, 27)
+    $null = Style-Bouton $btnRelire
     $gv.Controls.Add($btnRelire)
 
     $lblVoixEtat = New-Object System.Windows.Forms.Label
@@ -501,14 +520,13 @@ Start-Sleep -Seconds ([math]::Min(30, 2 + [int]($Texte.Length / 12)))
     # -------------------------------------------------------------- valider
     $bOk = New-Object System.Windows.Forms.Button
     $bOk.Text = 'Valider'; $bOk.SetBounds(440, 544, 120, 34)
-    $bOk.BackColor = $C_ACCENT; $bOk.ForeColor = [System.Drawing.Color]::White
-    $bOk.FlatStyle = 'Flat'; $bOk.FlatAppearance.BorderSize = 0
-    $bOk.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
     $d.Controls.Add($bOk)
+    $null = Style-Bouton $bOk -Principal
     $bCan = New-Object System.Windows.Forms.Button
     $bCan.Text = 'Annuler'; $bCan.SetBounds(570, 544, 114, 34)
     $bCan.DialogResult = 'Cancel'
     $d.Controls.Add($bCan)
+    $null = Style-Bouton $bCan
     $d.CancelButton = $bCan
 
     $script:VoixValide = $false
@@ -622,12 +640,12 @@ function Show-DodoHorairesDialog {
 
     $bAdd = New-Object System.Windows.Forms.Button
     $bAdd.Text = 'Ajouter'; $bAdd.SetBounds(16, 262, 110, 30)
-    $bAdd.BackColor = $C_ACCENT; $bAdd.ForeColor = [System.Drawing.Color]::White
-    $bAdd.FlatStyle = 'Flat'; $bAdd.FlatAppearance.BorderSize = 0
     $gp.Controls.Add($bAdd)
+    $null = Style-Bouton $bAdd -Principal
     $bDel = New-Object System.Windows.Forms.Button
     $bDel.Text = 'Supprimer la ligne'; $bDel.SetBounds(136, 262, 150, 30)
     $gp.Controls.Add($bDel)
+    $null = Style-Bouton $bDel
 
     $chkOff = New-Object System.Windows.Forms.CheckBox
     $chkOff.Text = 'Ne pas utiliser Internet — seules les périodes ci-dessus font foi'
@@ -655,14 +673,13 @@ function Show-DodoHorairesDialog {
 
     $bOk = New-Object System.Windows.Forms.Button
     $bOk.Text = 'Valider'; $bOk.SetBounds(400, 480, 120, 34)
-    $bOk.BackColor = $C_ACCENT; $bOk.ForeColor = [System.Drawing.Color]::White
-    $bOk.FlatStyle = 'Flat'; $bOk.FlatAppearance.BorderSize = 0
-    $bOk.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
     $d.Controls.Add($bOk)
+    $null = Style-Bouton $bOk -Principal
     $bCan = New-Object System.Windows.Forms.Button
     $bCan.Text = 'Annuler'; $bCan.SetBounds(530, 480, 114, 34)
     $bCan.DialogResult = 'Cancel'
     $d.Controls.Add($bCan)
+    $null = Style-Bouton $bCan
     $d.CancelButton = $bCan
 
     $script:HorairesValides = $false
@@ -724,34 +741,100 @@ $f.BackColor = $C_BG
 $f.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 
 $head = New-Object System.Windows.Forms.Panel
-$head.Dock = 'Top'; $head.Height = 74; $head.BackColor = $C_INK
+$head.Dock = 'Top'; $head.Height = 84; $head.BackColor = $C_INK
 $f.Controls.Add($head)
 
 $bar = New-Object System.Windows.Forms.Panel
-$bar.SetBounds(24, 18, 26, 3); $bar.BackColor = $C_SIGNAL
+$bar.SetBounds(24, 20, 32, 3); $bar.BackColor = $C_SIGNAL
 $head.Controls.Add($bar)
 
 $t1 = New-Object System.Windows.Forms.Label
 $t1.Text = 'Dodo'; $t1.ForeColor = [System.Drawing.Color]::White
-$t1.Font = New-Object System.Drawing.Font('Segoe UI', 19, [System.Drawing.FontStyle]::Bold)
-$t1.SetBounds(22, 24, 110, 34); $head.Controls.Add($t1)
+$t1.Font = New-Police 21 -Demi
+$t1.SetBounds(22, 28, 110, 38); $head.Controls.Add($t1)
 
 $t2 = New-Object System.Windows.Forms.Label
 $t2.Text = "Couvre-feu automatique  ·  extinction 21h00 en période scolaire, 23h00 pendant les vacances zone C"
-$t2.ForeColor = [System.Drawing.Color]::FromArgb(201, 212, 222)
-$t2.SetBounds(112, 36, 650, 20); $head.Controls.Add($t2)
+$t2.ForeColor = [System.Drawing.Color]::FromArgb(166, 181, 195)
+$t2.SetBounds(116, 42, 650, 20); $head.Controls.Add($t2)
 
+# 'Segoe UI Semibold' rend mieux que du gras, mais n'existe pas sur toutes les
+# installations : .NET retombe alors en silence sur une police par defaut
+# disgracieuse. On verifie donc ce qu'on a reellement obtenu.
+function New-Police([single]$taille, [switch]$Demi) {
+    if (-not $Demi) { return (New-Object System.Drawing.Font('Segoe UI', $taille)) }
+    $p = New-Object System.Drawing.Font('Segoe UI Semibold', $taille)
+    if ($p.Name -eq 'Segoe UI Semibold') { return $p }
+    return (New-Object System.Drawing.Font('Segoe UI', $taille, [System.Drawing.FontStyle]::Bold))
+}
+
+# Carte : un panneau blanc borde d'un trait clair, avec son titre a
+# l'interieur. Remplace le GroupBox, dont le cadre grave et le titre a cheval
+# sur la bordure datent de Windows XP. Les coordonnees des enfants ne changent
+# pas : le titre occupe la meme hauteur que celui d'un GroupBox.
 function New-Group([string]$title, [int]$top, [int]$height) {
-    $g = New-Object System.Windows.Forms.GroupBox
-    $g.Text = $title; $g.SetBounds(20, $top, 740, $height)
-    $g.BackColor = $C_PANEL; $g.ForeColor = $C_INK
-    $g.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $g = New-Object System.Windows.Forms.Panel
+    $g.SetBounds(20, $top, 740, $height)
+    $g.BackColor = $C_PANEL
+    $g.Add_Paint({
+        param($src, $e)
+        $e.Graphics.DrawRectangle(
+            (New-Object System.Drawing.Pen($C_BORD, 1)),
+            0, 0, $src.Width - 1, $src.Height - 1)
+    })
+    $lt = New-Object System.Windows.Forms.Label
+    $lt.Text = $title
+    $lt.SetBounds(16, 6, 700, 18)
+    $lt.ForeColor = $C_INK
+    $lt.Font = New-Police 9.5 -Demi
+    $g.Controls.Add($lt)
     $f.Controls.Add($g); return $g
+}
+
+# Boutons : plats, coins arrondis, survol. Le style Windows par defaut est
+# gris, borde et carre ; trois lignes suffisent a le remettre au gout du jour.
+function Set-BoutonArrondi($b, [int]$rayon = 6) {
+    $b.Add_Resize({
+        param($src, $e)
+        try {
+            $p = New-Object System.Drawing.Drawing2D.GraphicsPath
+            $r = 6; $w = $src.Width; $h = $src.Height
+            $p.AddArc(0, 0, $r * 2, $r * 2, 180, 90)
+            $p.AddArc($w - $r * 2 - 1, 0, $r * 2, $r * 2, 270, 90)
+            $p.AddArc($w - $r * 2 - 1, $h - $r * 2 - 1, $r * 2, $r * 2, 0, 90)
+            $p.AddArc(0, $h - $r * 2 - 1, $r * 2, $r * 2, 90, 90)
+            $p.CloseFigure()
+            $src.Region = New-Object System.Drawing.Region($p)
+        }
+        catch { }
+    })
+    $b.Width = $b.Width   # declenche le redimensionnement, donc le trace
+}
+
+function Style-Bouton($b, [switch]$Principal) {
+    $b.FlatStyle = 'Flat'
+    $b.FlatAppearance.BorderSize = 0
+    $b.Cursor = [System.Windows.Forms.Cursors]::Hand
+    if ($Principal) {
+        $b.BackColor = $C_ACCENT
+        $b.ForeColor = [System.Drawing.Color]::White
+        $b.Font = New-Police 10 -Demi
+        $b.FlatAppearance.MouseOverBackColor = $C_HOVER
+    }
+    else {
+        $b.BackColor = $C_DOUX
+        $b.ForeColor = $C_INK
+        $b.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+        $b.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(226, 232, 238)
+    }
+    Set-BoutonArrondi $b
+    return $b
 }
 function New-Lbl([string]$txt, [int]$x, [int]$y, [int]$w, $parent, $color = $null) {
     $l = New-Object System.Windows.Forms.Label
     $l.Text = $txt; $l.SetBounds($x, $y, $w, 32); $l.AutoSize = $false
     $l.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $l.ForeColor = $C_INK
     if ($color) { $l.ForeColor = $color }
     $parent.Controls.Add($l); return $l
 }
@@ -765,8 +848,9 @@ $g1.Controls.Add($cbChild)
 
 $lblAdmin = New-Lbl '' 280 26 300 $g1
 $btnDemote = New-Object System.Windows.Forms.Button
-$btnDemote.Text = 'Retirer des administrateurs'; $btnDemote.SetBounds(560, 24, 165, 26)
+$btnDemote.Text = 'Retirer des administrateurs'; $btnDemote.SetBounds(560, 24, 165, 28)
 $btnDemote.Visible = $false; $g1.Controls.Add($btnDemote)
+$null = Style-Bouton $btnDemote
 New-Lbl "L'enfant doit être un compte standard : un administrateur peut tout désactiver en trois clics." 16 58 700 $g1 ([System.Drawing.Color]::Gray) | Out-Null
 
 # --- 2. adultes exemptes
@@ -794,7 +878,8 @@ if ($cbSsid.Items.Count -gt 0) { $cbSsid.SelectedIndex = 0 }
 $g3.Controls.Add($cbSsid)
 
 $btnSsid = New-Object System.Windows.Forms.Button
-$btnSsid.Text = 'Détecter'; $btnSsid.SetBounds(450, 48, 80, 26); $g3.Controls.Add($btnSsid)
+$btnSsid.Text = 'Détecter'; $btnSsid.SetBounds(450, 48, 84, 28); $g3.Controls.Add($btnSsid)
+$null = Style-Bouton $btnSsid
 
 $lstAd = New-Object System.Windows.Forms.CheckedListBox
 $lstAd.SetBounds(16, 78, 708, 52)
@@ -824,6 +909,7 @@ $lblHoraires.ForeColor = $C_ACCENT
 $btnHoraires = New-Object System.Windows.Forms.Button
 $btnHoraires.Text = 'Horaires et vacances...'; $btnHoraires.SetBounds(545, 74, 180, 30)
 $g4.Controls.Add($btnHoraires)
+$null = Style-Bouton $btnHoraires
 
 $lblVoix = New-Lbl '' 16 110 520 $g4
 $lblVoix.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
@@ -831,18 +917,18 @@ $lblVoix.ForeColor = $C_ACCENT
 $btnVoix = New-Object System.Windows.Forms.Button
 $btnVoix.Text = 'Message parlé et voix...'; $btnVoix.SetBounds(545, 110, 180, 30)
 $g4.Controls.Add($btnVoix)
+$null = Style-Bouton $btnVoix
 
 # --- boutons
 $btnGo = New-Object System.Windows.Forms.Button
-$btnGo.Text = 'Installer'; $btnGo.SetBounds(20, 628, 150, 34)
-$btnGo.BackColor = $C_ACCENT; $btnGo.ForeColor = [System.Drawing.Color]::White
-$btnGo.FlatStyle = 'Flat'; $btnGo.FlatAppearance.BorderSize = 0
-$btnGo.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+$btnGo.Text = 'Installer'; $btnGo.SetBounds(20, 628, 150, 36)
 $f.Controls.Add($btnGo)
+$null = Style-Bouton $btnGo -Principal
 
 function New-Btn([string]$t, [int]$x, [int]$w) {
     $b = New-Object System.Windows.Forms.Button
-    $b.Text = $t; $b.SetBounds($x, 628, $w, 34); $f.Controls.Add($b); return $b
+    $b.Text = $t; $b.SetBounds($x, 628, $w, 36); $f.Controls.Add($b)
+    return (Style-Bouton $b)
 }
 $btnState  = New-Btn 'Voir l''état'        180 120
 $btnEve    = New-Btn 'Tester une soirée'   310 150
@@ -850,9 +936,11 @@ $btnUnins  = New-Btn 'Désinstaller'        470 120
 $btnClose  = New-Btn 'Fermer'              660 100
 
 $log = New-Object System.Windows.Forms.RichTextBox
-$log.SetBounds(20, 674, 740, 118); $log.ReadOnly = $true
-$log.Font = New-Object System.Drawing.Font('Consolas', 8.5)
-$log.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 251)
+$log.SetBounds(20, 678, 740, 114); $log.ReadOnly = $true
+$log.Font = New-Object System.Drawing.Font('Cascadia Mono', 9)
+if ($log.Font.Name -ne 'Cascadia Mono') { $log.Font = New-Object System.Drawing.Font('Consolas', 9) }
+$log.BackColor = [System.Drawing.Color]::FromArgb(252, 253, 254)
+$log.BorderStyle = 'None'
 $f.Controls.Add($log)
 
 # ================================================================= logique
