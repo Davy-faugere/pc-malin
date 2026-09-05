@@ -580,6 +580,54 @@ Assert-Equal $true ($runtime -match "Decision\s+=\s+Join-Path") `
     'le fichier de derniere decision a un chemin declare'
 
 # --------------------------------------------------------------------------
+Write-Section 'Aucune fonction appelee avant d etre definie'
+# En PowerShell un script s'execute de haut en bas : appeler une fonction
+# avant la ligne qui la definit leve "terme non reconnu" et tue le script.
+# C'est arrive en modernisant l'interface -- l'en-tete appelait New-Police,
+# definie plus bas -- et l'assistant ne demarrait plus. L'analyse syntaxique
+# ne voit rien : seule l'execution le revele.
+# On ne regarde que les appels IMMEDIATS : ceux places dans un bloc
+# d'evenement ou dans une autre fonction ne s'executent que plus tard, quand
+# tout le fichier a ete lu.
+foreach ($f in (Get-ChildItem -Path $srcDir2, $PSScriptRoot -Filter '*.ps1' -File | Sort-Object Name)) {
+    $er = $null; $tk = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tk, [ref]$er)
+
+    $defs = @{}
+    foreach ($d in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+        $nom = $d.Name.ToLowerInvariant()
+        if (-not $defs.ContainsKey($nom) -or $d.Extent.StartLineNumber -lt $defs[$nom]) {
+            $defs[$nom] = $d.Extent.StartLineNumber
+        }
+    }
+
+    $fautes = New-Object System.Collections.Generic.List[string]
+    foreach ($c in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+        $nom = $c.GetCommandName()
+        if ([string]::IsNullOrEmpty($nom)) { continue }
+        $nom = $nom.ToLowerInvariant()
+        if (-not $defs.ContainsKey($nom)) { continue }
+
+        # Appel differe (dans une fonction ou un bloc d'evenement) : sans objet.
+        $differe = $false
+        $par = $c.Parent
+        while ($null -ne $par) {
+            if ($par -is [System.Management.Automation.Language.FunctionDefinitionAst] -or
+                $par -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) { $differe = $true; break }
+            $par = $par.Parent
+        }
+        if ($differe) { continue }
+
+        if ($c.Extent.StartLineNumber -lt $defs[$nom]) {
+            $fautes.Add(("ligne {0} appelle {1} definie ligne {2}" -f $c.Extent.StartLineNumber, $nom, $defs[$nom]))
+        }
+    }
+    Assert-Equal 0 $fautes.Count `
+        ("$($f.Name) : aucune fonction appelee avant sa definition" +
+         $(if ($fautes.Count) { ' -> ' + (($fautes | Select-Object -First 3) -join ' ; ') } else { '' }))
+}
+
+# --------------------------------------------------------------------------
 Write-Section 'Purete ASCII des sources (accents interdits hors messages JSON)'
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 # Regle : un .ps1 est soit en ASCII pur, soit en UTF-8 AVEC BOM. Sans BOM,

@@ -342,11 +342,11 @@ function Show-DodoVoixDialog {
     $btnEcoute = New-Object System.Windows.Forms.Button
     $btnEcoute.Text = 'Écouter'; $btnEcoute.SetBounds(474, 52, 90, 27)
     $gv.Controls.Add($btnEcoute)
-    $null = Style-Bouton $btnEcoute -Principal
+    Style-Bouton $btnEcoute -Principal
 
     $btnRelire = New-Object System.Windows.Forms.Button
     $btnRelire.Text = 'Rechercher'; $btnRelire.SetBounds(572, 52, 84, 27)
-    $null = Style-Bouton $btnRelire
+    Style-Bouton $btnRelire
     $gv.Controls.Add($btnRelire)
 
     $lblVoixEtat = New-Object System.Windows.Forms.Label
@@ -521,12 +521,12 @@ Start-Sleep -Seconds ([math]::Min(30, 2 + [int]($Texte.Length / 12)))
     $bOk = New-Object System.Windows.Forms.Button
     $bOk.Text = 'Valider'; $bOk.SetBounds(440, 544, 120, 34)
     $d.Controls.Add($bOk)
-    $null = Style-Bouton $bOk -Principal
+    Style-Bouton $bOk -Principal
     $bCan = New-Object System.Windows.Forms.Button
     $bCan.Text = 'Annuler'; $bCan.SetBounds(570, 544, 114, 34)
     $bCan.DialogResult = 'Cancel'
     $d.Controls.Add($bCan)
-    $null = Style-Bouton $bCan
+    Style-Bouton $bCan
     $d.CancelButton = $bCan
 
     $script:VoixValide = $false
@@ -641,11 +641,11 @@ function Show-DodoHorairesDialog {
     $bAdd = New-Object System.Windows.Forms.Button
     $bAdd.Text = 'Ajouter'; $bAdd.SetBounds(16, 262, 110, 30)
     $gp.Controls.Add($bAdd)
-    $null = Style-Bouton $bAdd -Principal
+    Style-Bouton $bAdd -Principal
     $bDel = New-Object System.Windows.Forms.Button
     $bDel.Text = 'Supprimer la ligne'; $bDel.SetBounds(136, 262, 150, 30)
     $gp.Controls.Add($bDel)
-    $null = Style-Bouton $bDel
+    Style-Bouton $bDel
 
     $chkOff = New-Object System.Windows.Forms.CheckBox
     $chkOff.Text = 'Ne pas utiliser Internet — seules les périodes ci-dessus font foi'
@@ -674,12 +674,12 @@ function Show-DodoHorairesDialog {
     $bOk = New-Object System.Windows.Forms.Button
     $bOk.Text = 'Valider'; $bOk.SetBounds(400, 480, 120, 34)
     $d.Controls.Add($bOk)
-    $null = Style-Bouton $bOk -Principal
+    Style-Bouton $bOk -Principal
     $bCan = New-Object System.Windows.Forms.Button
     $bCan.Text = 'Annuler'; $bCan.SetBounds(530, 480, 114, 34)
     $bCan.DialogResult = 'Cancel'
     $d.Controls.Add($bCan)
-    $null = Style-Bouton $bCan
+    Style-Bouton $bCan
     $d.CancelButton = $bCan
 
     $script:HorairesValides = $false
@@ -731,33 +731,6 @@ function Show-DodoHorairesDialog {
 }
 
 # ================================================================= interface
-$f = New-Object System.Windows.Forms.Form
-$f.Text = 'Dodo - assistant d''installation'
-$f.ClientSize = New-Object System.Drawing.Size(780, 810)
-$f.StartPosition = 'CenterScreen'
-$f.FormBorderStyle = 'FixedDialog'
-$f.MaximizeBox = $false
-$f.BackColor = $C_BG
-$f.Font = New-Object System.Drawing.Font('Segoe UI', 9)
-
-$head = New-Object System.Windows.Forms.Panel
-$head.Dock = 'Top'; $head.Height = 84; $head.BackColor = $C_INK
-$f.Controls.Add($head)
-
-$bar = New-Object System.Windows.Forms.Panel
-$bar.SetBounds(24, 20, 32, 3); $bar.BackColor = $C_SIGNAL
-$head.Controls.Add($bar)
-
-$t1 = New-Object System.Windows.Forms.Label
-$t1.Text = 'Dodo'; $t1.ForeColor = [System.Drawing.Color]::White
-$t1.Font = New-Police 21 -Demi
-$t1.SetBounds(22, 28, 110, 38); $head.Controls.Add($t1)
-
-$t2 = New-Object System.Windows.Forms.Label
-$t2.Text = "Couvre-feu automatique  ·  extinction 21h00 en période scolaire, 23h00 pendant les vacances zone C"
-$t2.ForeColor = [System.Drawing.Color]::FromArgb(166, 181, 195)
-$t2.SetBounds(116, 42, 650, 20); $head.Controls.Add($t2)
-
 # 'Segoe UI Semibold' rend mieux que du gras, mais n'existe pas sur toutes les
 # installations : .NET retombe alors en silence sur une police par defaut
 # disgracieuse. On verifie donc ce qu'on a reellement obtenu.
@@ -794,21 +767,21 @@ function New-Group([string]$title, [int]$top, [int]$height) {
 # Boutons : plats, coins arrondis, survol. Le style Windows par defaut est
 # gris, borde et carre ; trois lignes suffisent a le remettre au gout du jour.
 function Set-BoutonArrondi($b, [int]$rayon = 6) {
-    $b.Add_Resize({
-        param($src, $e)
-        try {
-            $p = New-Object System.Drawing.Drawing2D.GraphicsPath
-            $r = 6; $w = $src.Width; $h = $src.Height
-            $p.AddArc(0, 0, $r * 2, $r * 2, 180, 90)
-            $p.AddArc($w - $r * 2 - 1, 0, $r * 2, $r * 2, 270, 90)
-            $p.AddArc($w - $r * 2 - 1, $h - $r * 2 - 1, $r * 2, $r * 2, 0, 90)
-            $p.AddArc(0, $h - $r * 2 - 1, $r * 2, $r * 2, 90, 90)
-            $p.CloseFigure()
-            $src.Region = New-Object System.Drawing.Region($p)
-        }
-        catch { }
-    })
-    $b.Width = $b.Width   # declenche le redimensionnement, donc le trace
+    # Les boutons ont deja leur taille definitive quand on passe ici : le
+    # contour est donc calcule une fois, sans passer par un evenement.
+    try {
+        $p = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $d = $rayon * 2
+        $w = $b.Width - 1
+        $h = $b.Height - 1
+        $p.AddArc(0, 0, $d, $d, 180, 90)
+        $p.AddArc($w - $d, 0, $d, $d, 270, 90)
+        $p.AddArc($w - $d, $h - $d, $d, $d, 0, 90)
+        $p.AddArc(0, $h - $d, $d, $d, 90, 90)
+        $p.CloseFigure()
+        $b.Region = New-Object System.Drawing.Region($p)
+    }
+    catch { }
 }
 
 function Style-Bouton($b, [switch]$Principal) {
@@ -828,7 +801,6 @@ function Style-Bouton($b, [switch]$Principal) {
         $b.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(226, 232, 238)
     }
     Set-BoutonArrondi $b
-    return $b
 }
 function New-Lbl([string]$txt, [int]$x, [int]$y, [int]$w, $parent, $color = $null) {
     $l = New-Object System.Windows.Forms.Label
@@ -838,6 +810,33 @@ function New-Lbl([string]$txt, [int]$x, [int]$y, [int]$w, $parent, $color = $nul
     if ($color) { $l.ForeColor = $color }
     $parent.Controls.Add($l); return $l
 }
+
+$f = New-Object System.Windows.Forms.Form
+$f.Text = 'Dodo - assistant d''installation'
+$f.ClientSize = New-Object System.Drawing.Size(780, 810)
+$f.StartPosition = 'CenterScreen'
+$f.FormBorderStyle = 'FixedDialog'
+$f.MaximizeBox = $false
+$f.BackColor = $C_BG
+$f.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+
+$head = New-Object System.Windows.Forms.Panel
+$head.Dock = 'Top'; $head.Height = 84; $head.BackColor = $C_INK
+$f.Controls.Add($head)
+
+$bar = New-Object System.Windows.Forms.Panel
+$bar.SetBounds(24, 20, 32, 3); $bar.BackColor = $C_SIGNAL
+$head.Controls.Add($bar)
+
+$t1 = New-Object System.Windows.Forms.Label
+$t1.Text = 'Dodo'; $t1.ForeColor = [System.Drawing.Color]::White
+$t1.Font = New-Police 21 -Demi
+$t1.SetBounds(22, 28, 110, 38); $head.Controls.Add($t1)
+
+$t2 = New-Object System.Windows.Forms.Label
+$t2.Text = "Couvre-feu automatique  ·  extinction 21h00 en période scolaire, 23h00 pendant les vacances zone C"
+$t2.ForeColor = [System.Drawing.Color]::FromArgb(166, 181, 195)
+$t2.SetBounds(116, 42, 650, 20); $head.Controls.Add($t2)
 
 # --- 1. compte de l'enfant
 $g1 = New-Group '1.  Compte de l''enfant' 88 96
@@ -850,7 +849,7 @@ $lblAdmin = New-Lbl '' 280 26 300 $g1
 $btnDemote = New-Object System.Windows.Forms.Button
 $btnDemote.Text = 'Retirer des administrateurs'; $btnDemote.SetBounds(560, 24, 165, 28)
 $btnDemote.Visible = $false; $g1.Controls.Add($btnDemote)
-$null = Style-Bouton $btnDemote
+Style-Bouton $btnDemote
 New-Lbl "L'enfant doit être un compte standard : un administrateur peut tout désactiver en trois clics." 16 58 700 $g1 ([System.Drawing.Color]::Gray) | Out-Null
 
 # --- 2. adultes exemptes
@@ -879,7 +878,7 @@ $g3.Controls.Add($cbSsid)
 
 $btnSsid = New-Object System.Windows.Forms.Button
 $btnSsid.Text = 'Détecter'; $btnSsid.SetBounds(450, 48, 84, 28); $g3.Controls.Add($btnSsid)
-$null = Style-Bouton $btnSsid
+Style-Bouton $btnSsid
 
 $lstAd = New-Object System.Windows.Forms.CheckedListBox
 $lstAd.SetBounds(16, 78, 708, 52)
@@ -909,7 +908,7 @@ $lblHoraires.ForeColor = $C_ACCENT
 $btnHoraires = New-Object System.Windows.Forms.Button
 $btnHoraires.Text = 'Horaires et vacances...'; $btnHoraires.SetBounds(545, 74, 180, 30)
 $g4.Controls.Add($btnHoraires)
-$null = Style-Bouton $btnHoraires
+Style-Bouton $btnHoraires
 
 $lblVoix = New-Lbl '' 16 110 520 $g4
 $lblVoix.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
@@ -917,18 +916,19 @@ $lblVoix.ForeColor = $C_ACCENT
 $btnVoix = New-Object System.Windows.Forms.Button
 $btnVoix.Text = 'Message parlé et voix...'; $btnVoix.SetBounds(545, 110, 180, 30)
 $g4.Controls.Add($btnVoix)
-$null = Style-Bouton $btnVoix
+Style-Bouton $btnVoix
 
 # --- boutons
 $btnGo = New-Object System.Windows.Forms.Button
 $btnGo.Text = 'Installer'; $btnGo.SetBounds(20, 628, 150, 36)
 $f.Controls.Add($btnGo)
-$null = Style-Bouton $btnGo -Principal
+Style-Bouton $btnGo -Principal
 
 function New-Btn([string]$t, [int]$x, [int]$w) {
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $t; $b.SetBounds($x, 628, $w, 36); $f.Controls.Add($b)
-    return (Style-Bouton $b)
+    Style-Bouton $b
+    return $b
 }
 $btnState  = New-Btn 'Voir l''état'        180 120
 $btnEve    = New-Btn 'Tester une soirée'   310 150
