@@ -215,9 +215,18 @@ catch { Log "Message d'extinction illisible ($($_.Exception.Message)) : texte pa
 if ([string]::IsNullOrWhiteSpace($comment)) { $comment = 'Dodo : extinction programmee.' }
 if ($comment.Length -gt 500) { $comment = $comment.Substring(0, 500) }
 
+# CAUSE DU "LE POSTE NE S'ETEINT JAMAIS", prouvee sur machine Windows reelle :
+# Start-Process joint les elements de -ArgumentList par des espaces SANS les
+# entourer de guillemets. Le commentaire contient des espaces : la ligne
+# devenait "shutdown /s /f /t 30 /c Il est l heure de dormir ...", soit une
+# dizaine d'arguments inconnus. shutdown.exe refusait la commande et renvoyait
+# le code 1 -- l'agent le journalisait, mais le poste restait allume.
+# On construit donc la ligne nous-memes, guillemets compris, et on passe UNE
+# seule chaine. Les guillemets internes deviennent des apostrophes : ils
+# fermeraient la chaine et ramenerait le meme defaut.
+$ligneArgs = '/s /f /t {0} /c "{1}"' -f $grace, ($comment -replace '"', "'")
 try {
-    $shutdownArgs = @('/s', '/f', '/t', [string]$grace, '/c', $comment)
-    $p = Start-Process -FilePath 'shutdown.exe' -ArgumentList $shutdownArgs -NoNewWindow -Wait -PassThru -ErrorAction Stop
+    $p = Start-Process -FilePath 'shutdown.exe' -ArgumentList $ligneArgs -NoNewWindow -Wait -PassThru -ErrorAction Stop
     if ($p.ExitCode -eq 0) {
         Log "EXTINCTION DEMANDEE (dans $grace s). $detail" 'ACTION' -Event
         # Une fenetre d'essai ne sert qu'une fois : on la retire immediatement

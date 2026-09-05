@@ -433,14 +433,19 @@ catch {
         foreach ($l in (Get-NouvellesLignes -Depuis $nR)) { Note $l }
         Chk ($rR.Code -eq 0) "l agent se termine en code 0 en mode reel (obtenu $($rR.Code))" ($rR.Lignes -join ' ')
 
-        $sortieAbort = @(& shutdown.exe /a 2>&1)
+        # Passer par cmd.exe : appele directement, shutdown.exe ecrit sur la
+        # sortie d'erreur quand il n'y a rien a annuler, et PowerShell en fait
+        # une erreur terminante qui sauterait le controle ci-dessous.
+        $sortieAbort = @(cmd.exe /c 'shutdown.exe /a 2>&1')
         $codeAbort   = $LASTEXITCODE
         Note ("shutdown /a -> code $codeAbort : " + ($sortieAbort -join ' '))
         Chk ($codeAbort -eq 0) 'une extinction etait REELLEMENT programmee (shutdown /a l a annulee)' `
             ("code $codeAbort : " + ($sortieAbort -join ' '))
+        Chk (@(Get-NouvellesLignes -Depuis $nR | Where-Object { $_ -match 'shutdown.exe a renvoye le code' }).Count -eq 0) `
+            'shutdown.exe accepte la commande (aucun code de retour en erreur)'
     }
     finally {
-        & shutdown.exe /a 2>&1 | Out-Null
+        cmd.exe /c 'shutdown.exe /a >nul 2>&1' | Out-Null
         $rawZ = Read-DodoJson -Path $paths.Config
         $rawZ | Add-Member -NotePropertyName 'dryRun' -NotePropertyValue $true -Force
         if ($null -ne $rawZ.PSObject.Properties['testWindow']) { $rawZ.PSObject.Properties.Remove('testWindow') }

@@ -2,6 +2,12 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/) · Versioning : [SemVer](https://semver.org/lang/fr/)
 
+## [1.4.4] - 2026-09-05
+
+### Corrigé
+- **LE POSTE NE S'ÉTEIGNAIT JAMAIS.** Les préavis vocaux se déclenchaient, la fenêtre s'affichait, puis rien. Cause : `Start-Process` colle les arguments les uns aux autres **sans guillemets**. Le message d'extinction contenant des espaces, la commande devenait `shutdown /s /f /t 30 /c Il est l heure de dormir …` — une dizaine d'arguments inconnus. `shutdown.exe` refusait la commande et renvoyait le code 1. La ligne de commande est désormais construite avec ses guillemets.
+- Ce chemin n'avait jamais été exercé nulle part : en simulation l'agent s'arrête juste **avant** l'appel à `shutdown.exe`. La recette Windows commande maintenant une **vraie** extinction, avec un délai de 600 s, vérifie auprès de Windows qu'elle est bien programmée (`shutdown /a` ne réussit que dans ce cas), puis l'annule
+
 ## [1.4.3] - 2026-09-05
 
 ### Corrigé
